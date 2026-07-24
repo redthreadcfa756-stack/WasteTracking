@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.pnpm-store/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+*.local
+*.log
+.DS_Store
+.firebase/
+firebase-debug.log
+service-account*.json

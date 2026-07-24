@@ -1,0 +1,115 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function memberDocument() {
+      return get(/databases/$(database)/documents/members/$(request.auth.uid));
+    }
+
+    function belongsToStore(storeId) {
+      return signedIn() && memberDocument().data.storeId == storeId;
+    }
+
+    function isAdmin(storeId) {
+      return belongsToStore(storeId) && memberDocument().data.role == 'admin';
+    }
+
+    function validWasteEvent(storeId) {
+      return request.resource.data.keys().hasOnly([
+          'storeId', 'productId', 'productName', 'equivalentUnits', 'displayQuantity',
+          'displayUnit', 'unitCostSnapshot', 'eventAt', 'dayKey', 'daypartId', 'menu',
+          'deviceName', 'createdBy', 'createdByName'
+        ])
+        && request.resource.data.storeId == storeId
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.productId is string
+        && request.resource.data.productName is string
+        && request.resource.data.equivalentUnits is number
+        && request.resource.data.equivalentUnits > 0
+        && request.resource.data.equivalentUnits <= 1000
+        && request.resource.data.displayQuantity is number
+        && request.resource.data.displayUnit in ['each', 'cup']
+        && request.resource.data.unitCostSnapshot is number
+        && request.resource.data.unitCostSnapshot >= 0
+        && request.resource.data.eventAt is timestamp
+        && request.resource.data.dayKey is string
+        && request.resource.data.daypartId in ['breakfast', 'lunch', 'afternoon', 'early-dinner', 'late-dinner']
+        && request.resource.data.menu in ['breakfast', 'lunch'];
+    }
+
+    function validSosEntry(storeId) {
+      return request.resource.data.keys().hasOnly([
+          'storeId', 'dayKey', 'hourStart', 'averageSeconds', 'loggedAt',
+          'createdBy', 'createdByName', 'deviceName'
+        ])
+        && request.resource.data.storeId == storeId
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.hourStart is int
+        && request.resource.data.hourStart >= 0
+        && request.resource.data.hourStart <= 23
+        && request.resource.data.averageSeconds is number
+        && request.resource.data.averageSeconds >= 0
+        && request.resource.data.averageSeconds <= 3600
+        && request.resource.data.loggedAt is timestamp;
+    }
+
+    function validDonationRecord(storeId) {
+      return request.resource.data.keys().hasOnly([
+          'storeId', 'dayKey', 'actuals', 'predictions', 'units', 'variance', 'initials',
+          'submittedAt', 'submittedBy', 'submittedByName', 'revision'
+        ])
+        && request.resource.data.storeId == storeId
+        && request.resource.data.submittedBy == request.auth.uid
+        && request.resource.data.initials is string
+        && request.resource.data.initials.size() >= 2
+        && request.resource.data.initials.size() <= 5
+        && request.resource.data.revision is int
+        && request.resource.data.revision >= 1
+        && request.resource.data.submittedAt is timestamp;
+    }
+
+    match /members/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow write: if false;
+    }
+
+    match /stores/{storeId} {
+      allow read: if belongsToStore(storeId);
+      allow write: if isAdmin(storeId);
+
+      match /settings/{settingsId} {
+        allow read: if belongsToStore(storeId);
+        allow create, update: if isAdmin(storeId);
+        allow delete: if false;
+      }
+
+      match /wasteEvents/{eventId} {
+        allow read: if belongsToStore(storeId);
+        allow create: if belongsToStore(storeId) && validWasteEvent(storeId);
+        allow update: if false;
+        allow delete: if belongsToStore(storeId)
+          && (resource.data.createdBy == request.auth.uid || isAdmin(storeId));
+      }
+
+      match /sosEntries/{entryId} {
+        allow read: if belongsToStore(storeId);
+        allow create, update: if belongsToStore(storeId) && validSosEntry(storeId);
+        allow delete: if isAdmin(storeId);
+      }
+
+      match /donationRecords/{dayKey} {
+        allow read: if belongsToStore(storeId);
+        allow create, update: if belongsToStore(storeId) && validDonationRecord(storeId);
+        allow delete: if isAdmin(storeId);
+      }
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
