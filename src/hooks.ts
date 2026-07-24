@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { User } from 'firebase/auth';
-import { observeAuth, subscribeDonationRecord, subscribeMember, subscribeSettings, subscribeSosForDay, subscribeWasteForDay } from './data';
+import { observeAuth, subscribeDonationRecord, subscribeSettings, subscribeSosForDay, subscribeWasteForDay } from './data';
 import { dayKey, previousDayKey } from './domain';
 import type { AppSettings, DonationRecord, MemberProfile, SosEntry, WasteEvent } from './types';
 
@@ -27,27 +27,13 @@ export function useAuthUser() {
 }
 
 export function useMember(user: User | null) {
-  const [member, setMember] = useState<MemberProfile | null>(null);
-  const [loading, setLoading] = useState(Boolean(user));
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    if (!user) {
-      setMember(null);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    return subscribeMember(user.uid, (profile) => {
-      setMember(profile);
-      setLoading(false);
-    }, (caught) => {
-      setError(caught.message);
-      setLoading(false);
-    });
-  }, [user]);
-
-  return { member, loading, error };
+  const member = useMemo<MemberProfile | null>(() => user ? ({
+    uid: user.uid,
+    storeId: import.meta.env.VITE_STORE_ID || '00756',
+    displayName: 'Store team',
+    role: 'admin',
+  }) : null, [user]);
+  return { member, loading: false, error: '' };
 }
 
 export function useNow() {

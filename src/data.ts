@@ -2,6 +2,7 @@ import {
   EmailAuthProvider,
   onAuthStateChanged,
   reauthenticateWithCredential,
+  signInAnonymously,
   signInWithEmailAndPassword,
   signOut,
   type User,
@@ -31,7 +32,20 @@ function requireFirebase() {
 
 export function observeAuth(callback: (user: User | null) => void): Unsubscribe {
   const services = requireFirebase();
-  return onAuthStateChanged(services.auth, callback);
+  let signingIn = false;
+  return onAuthStateChanged(services.auth, (user) => {
+    if (user) {
+      callback(user);
+      return;
+    }
+    if (signingIn) return;
+    signingIn = true;
+    signInAnonymously(services.auth)
+      .catch(() => callback(null))
+      .finally(() => {
+        signingIn = false;
+      });
+  });
 }
 
 export async function login(email: string, password: string): Promise<void> {

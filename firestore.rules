@@ -6,16 +6,8 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function memberDocument() {
-      return get(/databases/$(database)/documents/members/$(request.auth.uid));
-    }
-
     function belongsToStore(storeId) {
-      return signedIn() && memberDocument().data.storeId == storeId;
-    }
-
-    function isAdmin(storeId) {
-      return belongsToStore(storeId) && memberDocument().data.role == 'admin';
+      return signedIn() && storeId == '00756';
     }
 
     function validWasteEvent(storeId) {
@@ -73,17 +65,16 @@ service cloud.firestore {
     }
 
     match /members/{uid} {
-      allow read: if signedIn() && request.auth.uid == uid;
-      allow write: if false;
+      allow read, write: if false;
     }
 
     match /stores/{storeId} {
       allow read: if belongsToStore(storeId);
-      allow write: if isAdmin(storeId);
+      allow write: if false;
 
       match /settings/{settingsId} {
         allow read: if belongsToStore(storeId);
-        allow create, update: if isAdmin(storeId);
+        allow create, update: if belongsToStore(storeId);
         allow delete: if false;
       }
 
@@ -92,19 +83,19 @@ service cloud.firestore {
         allow create: if belongsToStore(storeId) && validWasteEvent(storeId);
         allow update: if false;
         allow delete: if belongsToStore(storeId)
-          && (resource.data.createdBy == request.auth.uid || isAdmin(storeId));
+          && resource.data.createdBy == request.auth.uid;
       }
 
       match /sosEntries/{entryId} {
         allow read: if belongsToStore(storeId);
         allow create, update: if belongsToStore(storeId) && validSosEntry(storeId);
-        allow delete: if isAdmin(storeId);
+        allow delete: if belongsToStore(storeId);
       }
 
       match /donationRecords/{dayKey} {
         allow read: if belongsToStore(storeId);
         allow create, update: if belongsToStore(storeId) && validDonationRecord(storeId);
-        allow delete: if isAdmin(storeId);
+        allow delete: if belongsToStore(storeId);
       }
     }
 

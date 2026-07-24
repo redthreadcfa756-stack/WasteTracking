@@ -7,7 +7,6 @@ import {
   Cloud,
   CloudOff,
   Gift,
-  LogOut,
   RotateCcw,
   Save,
   Settings,
@@ -22,7 +21,6 @@ import {
   createWasteEvent,
   login,
   logout,
-  reauthenticate,
   removeWasteEvents,
   saveDonationRecord,
   saveSettings,
@@ -60,6 +58,7 @@ import type {
 
 type TabId = 'waste' | 'sos' | 'donations' | 'admin';
 type MenuSelection = 'auto' | MenuId;
+const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || '00756';
 
 const TABS: Array<{ id: TabId; label: string; icon: typeof Trash2 }> = [
   { id: 'waste', label: 'Waste', icon: Trash2 },
@@ -83,8 +82,7 @@ function App() {
   if (!firebaseConfigured) return <ConfigurationRequired />;
   if (loading || (user && memberState.loading)) return <FullScreenMessage>Connecting to the shared store…</FullScreenMessage>;
   if (error || memberState.error) return <FullScreenMessage tone="error">{error || memberState.error}</FullScreenMessage>;
-  if (!user) return <SignIn />;
-  if (!memberState.member) return <MissingMembership user={user} />;
+  if (!user || !memberState.member) return <FullScreenMessage tone="error">Could not connect automatically. Enable Anonymous sign-in in Firebase Authentication, then reload.</FullScreenMessage>;
   return <Dashboard user={user} member={memberState.member} />;
 }
 
@@ -180,10 +178,6 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
   const selectTab = (tab: TabId) => {
     if (tab === activeTab) return;
     if (tab === 'admin') {
-      if (member.role !== 'admin') {
-        notify('This account does not have admin access.');
-        return;
-      }
       setAdminPrompt(true);
       return;
     }
@@ -211,7 +205,6 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
             {online ? <Cloud aria-hidden="true" /> : <CloudOff aria-hidden="true" />}
             {online ? 'Live sync' : 'Offline'}
           </span>
-          <button className="icon-button" aria-label="Sign out" onClick={() => logout()}><LogOut /></button>
         </div>
       </header>
 
@@ -858,26 +851,22 @@ function AdminTab({ settings, storeId, deviceName, notify }: {
 function AdminUnlock({ onClose, onUnlocked }: { onClose: () => void; onUnlocked: () => void }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
-  const submit = async (event: FormEvent) => {
+  const submit = (event: FormEvent) => {
     event.preventDefault();
-    setBusy(true);
     setError('');
-    try {
-      await reauthenticate(password);
+    if (password === ADMIN_PASSWORD) {
       onUnlocked();
-    } catch (caught) {
-      setError('Admin password is incorrect.');
-      setBusy(false);
+      return;
     }
+    setError('Admin password is incorrect.');
   };
   return (
     <Modal title="Unlock Admin" icon={<ShieldCheck />} onClose={onClose}>
       <form className="modal-form" onSubmit={submit}>
-        <p>Firebase verifies the password every time this tab is opened.</p>
+        <p>Enter the store admin password.</p>
         <label>Admin password<input autoFocus type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required /></label>
         {error && <p className="form-error" role="alert">{error}</p>}
-        <button className="primary-button" disabled={busy}>{busy ? 'Verifying…' : 'Unlock'}</button>
+        <button className="primary-button">Unlock</button>
       </form>
     </Modal>
   );

@@ -6,7 +6,7 @@ An iOS-first installable web app with live multi-device waste tracking, hourly S
 
 - **GitHub** stores the source and runs tests on every production push.
 - **Cloudflare Pages** serves the compiled static PWA.
-- **Firebase Authentication** signs devices in with email/password accounts.
+- **Firebase Authentication** signs devices in anonymously in the background.
 - **Cloud Firestore** provides realtime listeners, offline caching, and the shared backend.
 
 No Cloudflare Function or Firebase Cloud Function is required. That keeps this version compatible with the no-cost tiers. Firestore’s free quota currently includes one free database, 1 GiB stored data, 50,000 reads/day, 20,000 writes/day, and 20,000 deletes/day. Monitor usage as the store adds devices.
@@ -27,7 +27,7 @@ The app intentionally shows “Connect Firebase” until all six values in `.env
 
 1. Create a Firebase project on the **Spark** plan. Analytics is optional.
 2. Register a Web app and copy its configuration into `.env.local`.
-3. In **Authentication → Sign-in method**, enable **Email/Password**.
+3. In **Authentication → Sign-in method**, enable **Anonymous**.
 4. In **Firestore Database**, create the single production database. Choose a region near the store.
 5. Copy `.firebaserc.example` to `.firebaserc` and replace the project ID.
 6. Deploy the rules and indexes:
@@ -37,45 +37,22 @@ pnpm dlx firebase-tools login
 pnpm dlx firebase-tools deploy --only firestore
 ```
 
-Do not use Firestore test mode. The included rules require a signed-in store member and enforce admin-only settings writes.
+Do not use Firestore test mode. The included rules require an anonymously signed-in Firebase session and restrict access to store `00756`.
 
-## 3. Create the manager account and store membership
+## 3. Configure public store access
 
-The safest simple setup is:
+Set these additional build variables locally and in Cloudflare Pages:
 
-1. In **Firebase Authentication → Users**, create the manager email account and set its password to the requested admin password.
-2. Copy that user’s UID.
-3. In **Project settings → Service accounts**, create a temporary private key. Keep it outside this repository.
-4. Run the seed command:
-
-```bash
-GOOGLE_APPLICATION_CREDENTIALS=/absolute/path/to/service-account.json \
-ADMIN_UID=the-firebase-user-uid \
-ADMIN_NAME="Manager" \
-STORE_ID=store-0001 \
-STORE_NAME="Your Store Name" \
-pnpm seed
+```text
+VITE_STORE_ID=00756
+VITE_ADMIN_PASSWORD=00756
 ```
 
-Delete or securely archive the downloaded service-account key after bootstrap. It is ignored by `.gitignore`, but it should never be committed.
-
-The manager signs in once per device. Opening the Admin tab asks for the Firebase password every time and calls Firebase reauthentication. The password is never embedded in the JavaScript bundle or stored in Firestore.
-
-To add employee-only accounts, create each user in Firebase Authentication and add a `members/{uid}` document:
-
-```json
-{
-  "storeId": "store-0001",
-  "displayName": "Employee initials or name",
-  "role": "employee"
-}
-```
-
-An employee can track waste, SOS, and donations but cannot open or write Admin settings.
+Change `VITE_ADMIN_PASSWORD` to the desired store password before building. The password is embedded in the browser bundle and is only a convenience lock. Anyone who can inspect or modify requests from the public site can bypass it and write shared settings or operational data.
 
 ## 4. Verify Firebase locally
 
-Sign in with the manager account, open Admin, and press **Save all changes** once. This creates `stores/store-0001/settings/app` from the built-in defaults.
+Open the app, enter the configured password in Admin, and press **Save all changes** once. This creates `stores/00756/settings/app` from the built-in defaults.
 
 Then open the app in two browser windows. A waste tap in one should appear in the other through the Firestore realtime listener.
 
@@ -110,6 +87,8 @@ Repository variables:
 - `VITE_FIREBASE_STORAGE_BUCKET`
 - `VITE_FIREBASE_MESSAGING_SENDER_ID`
 - `VITE_FIREBASE_APP_ID`
+- `VITE_STORE_ID`
+- `VITE_ADMIN_PASSWORD`
 
 Firebase Web configuration values identify the project but are not backend admin secrets. Firestore rules and Authentication provide the access control.
 

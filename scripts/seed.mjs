@@ -3,7 +3,7 @@ import { applicationDefault, cert, initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { FieldValue, getFirestore } from 'firebase-admin/firestore';
 
-const storeId = process.env.STORE_ID || 'store-0001';
+const storeId = process.env.STORE_ID || '00756';
 const storeName = process.env.STORE_NAME || 'Waste + SOS Store';
 const adminName = process.env.ADMIN_NAME || 'Manager';
 const adminEmail = process.env.ADMIN_EMAIL;
