@@ -82,16 +82,19 @@ export function useStoreData(storeId: string | undefined, now: Date) {
   const [sosEntries, setSosEntries] = useState<SosEntry[]>([]);
   const [donationRecord, setDonationRecord] = useState<DonationRecord | null>(null);
   const [error, setError] = useState('');
-  const [ready, setReady] = useState(false);
+  const [ready, setReady] = useState(Boolean(storeId));
 
   useEffect(() => {
     if (!storeId) return;
-    setReady(false);
-    const handleError = (caught: { message: string }) => setError(caught.message);
+    setError('');
+    setReady(true);
+    const handleError = (caught: { message: string }) => {
+      setError(caught.message);
+      setReady(true);
+    };
     const subscriptions = [
       subscribeSettings(storeId, (value) => {
         setSettings(value);
-        setReady(true);
       }, handleError),
       subscribeWasteForDay(storeId, today, setTodayWaste, handleError),
       subscribeWasteForDay(storeId, previous, setPreviousWaste, handleError),

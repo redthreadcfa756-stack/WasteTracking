@@ -59,6 +59,16 @@ import type {
 type TabId = 'waste' | 'sos' | 'donations' | 'admin';
 type MenuSelection = 'auto' | MenuId;
 const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || '00756';
+const WRITE_TIMEOUT_MS = 8_000;
+
+function confirmWrite<T>(write: Promise<T>): Promise<T> {
+  return Promise.race([
+    write,
+    new Promise<never>((_, reject) => {
+      window.setTimeout(() => reject(new Error('Sync is taking too long. Check Recent activity before trying again.')), WRITE_TIMEOUT_MS);
+    }),
+  ]);
+}
 
 const TABS: Array<{ id: TabId; label: string; icon: typeof Trash2 }> = [
   { id: 'waste', label: 'Waste', icon: Trash2 },
@@ -325,7 +335,7 @@ function WasteTab({
     const displayUnit = isCup ? 'cup' : 'each';
     setBusyProduct(product.id);
     try {
-      await createWasteEvent({
+      await confirmWrite(createWasteEvent({
         storeId: member.storeId,
         productId: product.id,
         productName: product.name,
@@ -339,7 +349,7 @@ function WasteTab({
         deviceName,
         createdBy: member.uid,
         createdByName: member.displayName,
-      });
+      }));
       const projectedCost = activeWaste.cost + equivalentUnits * product.unitCost;
       if (projectedCost > daypart.totalDollarTarget && Date.now() >= warningMutedUntil) {
         showWarning({ daypart: daypart.label, total: projectedCost, target: daypart.totalDollarTarget });
