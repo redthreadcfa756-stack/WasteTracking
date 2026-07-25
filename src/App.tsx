@@ -19,6 +19,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } 
 import type { User } from 'firebase/auth';
 import {
   createWasteEvent,
+  loadDonationRecordsForDateRange,
   loadWasteForDateRange,
   login,
   logout,
@@ -31,6 +32,7 @@ import { DEFAULT_SETTINGS } from './defaults';
 import {
   daypartWaste,
   dayKey,
+  buildDonationCsv,
   buildWasteCsv,
   detectDaypart,
   displayProductQuantity,
@@ -837,6 +839,7 @@ function AdminTab({ settings, storeId, deviceName, notify }: {
   const [exportDays, setExportDays] = useState<1 | 30 | 60 | 90>(1);
   const [exportGrouping, setExportGrouping] = useState<WasteExportGrouping>('hour');
   const [exporting, setExporting] = useState(false);
+  const [exportingDonations, setExportingDonations] = useState(false);
 
   useEffect(() => setDraft(structuredClone(settings)), [settings]);
 
@@ -932,6 +935,34 @@ function AdminTab({ settings, storeId, deviceName, notify }: {
     }
   };
 
+  const exportDonations = async () => {
+    setExportingDonations(true);
+    try {
+      const records = await loadDonationRecordsForDateRange(storeId, exportStartDate, exportEndDate);
+      if (records.length === 0) {
+        notify(`No submitted donation data was found from ${exportStartDate} through ${exportEndDate}.`);
+        return;
+      }
+      const csv = buildDonationCsv(records, draft, exportStartDate, exportEndDate, exportDays);
+      const url = URL.createObjectURL(new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = exportDays === 1
+        ? `donations-${exportEndDate}.csv`
+        : `donations-${exportDays}-days-ending-${exportEndDate}.csv`;
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+      notify(`${exportDays}-day donation export downloaded.`);
+    } catch (caught) {
+      notify(errorMessage(caught));
+    } finally {
+      setExportingDonations(false);
+    }
+  };
+
   return (
     <section className="panel-stack">
       <div className="section-heading">
@@ -994,8 +1025,8 @@ function AdminTab({ settings, storeId, deviceName, notify }: {
       <div className="export-panel">
         <div>
           <p className="eyebrow">CSV export</p>
-          <h3>Export waste data</h3>
-          <p>Downloads net waste from all devices. Multi-day averages use only days logged for each row.</p>
+          <h3>Export reports</h3>
+          <p>Download waste trends or submitted donation totals and averages for the selected range.</p>
         </div>
         <label>
           Starting date
@@ -1015,14 +1046,17 @@ function AdminTab({ settings, storeId, deviceName, notify }: {
           </select>
         </label>
         <label>
-          Aggregate by
+          Waste aggregate by
           <select value={exportGrouping} onChange={(event) => setExportGrouping(event.target.value as WasteExportGrouping)}>
             <option value="hour">Hour</option>
             <option value="daypart">Daypart</option>
           </select>
         </label>
         <button className="primary-button" onClick={exportWaste} disabled={exporting || !exportStartDate || !exportEndDate}>
-          <Download aria-hidden="true" /> {exporting ? 'Preparing…' : 'Download CSV'}
+          <Download aria-hidden="true" /> {exporting ? 'Preparing…' : 'Download waste CSV'}
+        </button>
+        <button className="secondary-button" onClick={exportDonations} disabled={exportingDonations || !exportStartDate || !exportEndDate}>
+          <Download aria-hidden="true" /> {exportingDonations ? 'Preparing…' : 'Download donations CSV'}
         </button>
       </div>
       <p className="footnote">Over-target alerts are muted for {draft.warningCooldownSeconds} seconds after dismissal. Donation predictions use the saved average weights.</p>

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS } from './defaults';
-import { buildWasteCsv, detectDaypart, distributeDollarTarget, donationPrediction, formatDurationInput, mergeActivity, parseDuration } from './domain';
-import type { WasteEvent } from './types';
+import { buildDonationCsv, buildWasteCsv, detectDaypart, distributeDollarTarget, donationPrediction, formatDurationInput, mergeActivity, parseDuration } from './domain';
+import type { DonationRecord, WasteEvent } from './types';
 
 const event = (overrides: Partial<WasteEvent>): WasteEvent => ({
   id: 'event', storeId: 'store', productId: 'filets', productName: 'Filets', equivalentUnits: 1,
@@ -65,6 +65,27 @@ describe('domain rules', () => {
       event({ id: 'b', equivalentUnits: 10, unitCostSnapshot: 2, dayKey: '2026-07-02' }),
     ], DEFAULT_SETTINGS, 'hour', '2026-07-01', '2026-07-30', 30);
     expect(csv).toContain(',Filets,30,15,each,60.00,30.00,2,30,2');
+  });
+
+  it('exports donation averages per submitted day', () => {
+    const record = (day: string, actual: number): DonationRecord => ({
+      storeId: '00756',
+      dayKey: day,
+      actuals: { 'filet-total': actual },
+      predictions: { 'filet-total': 2 },
+      units: { 'filet-total': 'lb' },
+      variance: { 'filet-total': actual - 2 },
+      initials: 'CL',
+      submittedAt: new Date(),
+      submittedBy: 'uid',
+      submittedByName: 'Store team',
+      revision: 1,
+    });
+    const csv = buildDonationCsv([
+      record('2026-07-01', 4),
+      record('2026-07-02', 6),
+    ], DEFAULT_SETTINGS, '2026-07-01', '2026-07-30', 30);
+    expect(csv).toContain('Filet Total,lb,10,5,4,2,6,3,2,2,30,CL,1');
   });
 
   it('distributes a whole daypart target to the same dollar total', () => {

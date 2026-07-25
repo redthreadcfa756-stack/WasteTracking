@@ -3,6 +3,7 @@ import type {
   DaypartConfig,
   DaypartId,
   DonationItemConfig,
+  DonationRecord,
   MergedActivity,
   ProductConfig,
   WasteEvent,
@@ -272,5 +273,75 @@ export function buildWasteCsv(
         String(row.entries),
       ]);
     });
+  return lines.map((line) => line.map(escape).join(',')).join('\r\n');
+}
+
+export function buildDonationCsv(
+  records: DonationRecord[],
+  settings: AppSettings,
+  startDayKey: string,
+  endDayKey = startDayKey,
+  daysInRange = 1,
+): string {
+  const rows = settings.donationItems.map((item) => {
+    const submitted = records.filter((record) => Object.hasOwn(record.actuals, item.id));
+    const predicted = submitted.filter((record) => record.predictions[item.id] !== null && record.predictions[item.id] !== undefined);
+    const actualTotal = submitted.reduce((sum, record) => sum + (record.actuals[item.id] || 0), 0);
+    const predictedTotal = predicted.reduce((sum, record) => sum + (record.predictions[item.id] || 0), 0);
+    const variances = submitted.filter((record) => record.variance[item.id] !== null && record.variance[item.id] !== undefined);
+    const varianceTotal = variances.reduce((sum, record) => sum + (record.variance[item.id] || 0), 0);
+    return {
+      name: item.name,
+      unit: submitted[0]?.units[item.id] || item.unit,
+      actualTotal,
+      actualAverage: submitted.length ? actualTotal / submitted.length : 0,
+      predictedTotal,
+      predictedAverage: predicted.length ? predictedTotal / predicted.length : null,
+      varianceTotal,
+      varianceAverage: variances.length ? varianceTotal / variances.length : null,
+      submittedDays: submitted.length,
+      predictionDays: predicted.length,
+      initials: [...new Set(submitted.map((record) => record.initials))].join(' | '),
+      maxRevision: submitted.reduce((highest, record) => Math.max(highest, record.revision), 0),
+    };
+  });
+  const escape = (value: string | number) => {
+    const text = String(value);
+    return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  };
+  const lines = [[
+    'Range start',
+    'Range end',
+    'Donation item',
+    'Unit',
+    'Total actual',
+    'Average actual per submitted day',
+    'Total predicted',
+    'Average predicted per predicted day',
+    'Total variance',
+    'Average variance',
+    'Submitted days',
+    'Prediction days',
+    'Days in range',
+    'Initials',
+    'Highest revision',
+  ]];
+  rows.forEach((row) => lines.push([
+    startDayKey,
+    endDayKey,
+    row.name,
+    row.unit,
+    formatQuantity(row.actualTotal),
+    formatQuantity(row.actualAverage),
+    row.predictionDays ? formatQuantity(row.predictedTotal) : '',
+    row.predictedAverage === null ? '' : formatQuantity(row.predictedAverage),
+    row.varianceAverage === null ? '' : formatQuantity(row.varianceTotal),
+    row.varianceAverage === null ? '' : formatQuantity(row.varianceAverage),
+    String(row.submittedDays),
+    String(row.predictionDays),
+    String(daysInRange),
+    row.initials,
+    String(row.maxRevision),
+  ]));
   return lines.map((line) => line.map(escape).join(',')).join('\r\n');
 }

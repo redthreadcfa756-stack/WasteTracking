@@ -178,6 +178,20 @@ export function subscribeDonationRecord(
   }, onError);
 }
 
+export async function loadDonationRecordsForDateRange(
+  storeId: string,
+  startDayKey: string,
+  endDayKey: string,
+): Promise<DonationRecord[]> {
+  const services = requireFirebase();
+  const snapshot = await getDocs(query(
+    collection(services.db, 'stores', storeId, 'donationRecords'),
+    where('dayKey', '>=', startDayKey),
+    where('dayKey', '<=', endDayKey),
+  ));
+  return snapshot.docs.map((recordDoc) => recordDoc.data() as DonationRecord);
+}
+
 export async function saveDonationRecord(record: Omit<DonationRecord, 'submittedAt'>): Promise<void> {
   const services = requireFirebase();
   await setDoc(doc(services.db, 'stores', record.storeId, 'donationRecords', record.dayKey), {
