@@ -310,6 +310,38 @@ code { font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.9em; }
   border-color: var(--danger);
   color: var(--danger);
 }
+.trend-preview {
+  display: grid;
+  gap: 0.75rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  background: #f8fcff;
+}
+.trend-preview > div:first-child {
+  display: grid;
+  gap: 0.2rem;
+}
+.trend-preview > div:first-child span {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.trend-bar-row {
+  display: grid;
+  grid-template-columns: minmax(105px, 0.8fr) minmax(120px, 2fr) auto;
+  gap: 0.65rem;
+  align-items: center;
+  font-size: 0.8rem;
+}
+.trend-bar-track {
+  height: 18px;
+  overflow: hidden;
+  background: #dceaf1;
+}
+.trend-bar-track > span {
+  display: block;
+  height: 100%;
+  background: var(--red);
+}
 .admin-dropdown {
   border-top: 5px solid var(--red);
   background: #fff;

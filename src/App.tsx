@@ -38,6 +38,7 @@ import {
   dayKey,
   buildDonationCsv,
   buildWasteCsv,
+  buildWasteTrend,
   detectDaypart,
   displayProductQuantity,
   donationPrediction,
@@ -848,6 +849,8 @@ function AdminTab({ settings, member, deviceName, notify }: {
   const [exportingDonations, setExportingDonations] = useState(false);
   const [exportSource, setExportSource] = useState<'live' | 'demo'>('live');
   const [changingDemoData, setChangingDemoData] = useState(false);
+  const [trendPreview, setTrendPreview] = useState<ReturnType<typeof buildWasteTrend>>([]);
+  const [previewingTrend, setPreviewingTrend] = useState(false);
 
   useEffect(() => setDraft(structuredClone(settings)), [settings]);
 
@@ -904,6 +907,7 @@ function AdminTab({ settings, member, deviceName, notify }: {
   };
 
   const updateExportDates = (period: ExportPeriod, endingDate: string) => {
+    setTrendPreview([]);
     setExportPeriod(period);
     setExportEndDate(endingDate);
     if (period === 'custom') return;
@@ -956,6 +960,25 @@ function AdminTab({ settings, member, deviceName, notify }: {
       notify(errorMessage(caught));
     } finally {
       setExporting(false);
+    }
+  };
+
+  const previewWasteTrend = async () => {
+    setPreviewingTrend(true);
+    try {
+      if (!selectedExportDays()) {
+        notify('Choose a starting date that is on or before the ending date.');
+        return;
+      }
+      const events = exportSource === 'demo'
+        ? await loadDemoWasteForDateRange(storeId, exportStartDate, exportEndDate)
+        : await loadWasteForDateRange(storeId, exportStartDate, exportEndDate);
+      setTrendPreview(buildWasteTrend(events, draft, exportGrouping));
+      if (events.length === 0) notify('No waste data was found for the selected range.');
+    } catch (caught) {
+      notify(errorMessage(caught));
+    } finally {
+      setPreviewingTrend(false);
     }
   };
 
@@ -1093,6 +1116,7 @@ function AdminTab({ settings, member, deviceName, notify }: {
           <input type="date" value={exportStartDate} onChange={(event) => {
             setExportStartDate(event.target.value);
             setExportPeriod('custom');
+            setTrendPreview([]);
           }} />
         </label>
         <label>
@@ -1100,6 +1124,7 @@ function AdminTab({ settings, member, deviceName, notify }: {
           <input type="date" value={exportEndDate} onChange={(event) => {
             if (exportPeriod === 'custom') {
               setExportEndDate(event.target.value);
+              setTrendPreview([]);
             } else {
               updateExportDates(exportPeriod, event.target.value);
             }
@@ -1120,14 +1145,20 @@ function AdminTab({ settings, member, deviceName, notify }: {
         </label>
         <label>
           Data source
-          <select value={exportSource} onChange={(event) => setExportSource(event.target.value as 'live' | 'demo')}>
+          <select value={exportSource} onChange={(event) => {
+            setExportSource(event.target.value as 'live' | 'demo');
+            setTrendPreview([]);
+          }}>
             <option value="live">Live data</option>
             <option value="demo">Demo data</option>
           </select>
         </label>
         <label>
           Waste aggregate by
-          <select value={exportGrouping} onChange={(event) => setExportGrouping(event.target.value as WasteExportGrouping)}>
+          <select value={exportGrouping} onChange={(event) => {
+            setExportGrouping(event.target.value as WasteExportGrouping);
+            setTrendPreview([]);
+          }}>
             <option value="hour">Hour</option>
             <option value="daypart">Daypart</option>
           </select>
@@ -1135,9 +1166,29 @@ function AdminTab({ settings, member, deviceName, notify }: {
         <button className="primary-button" onClick={exportWaste} disabled={exporting || !exportStartDate || !exportEndDate}>
           <Download aria-hidden="true" /> {exporting ? 'Preparing…' : 'Download waste CSV'}
         </button>
+        <button className="secondary-button" onClick={previewWasteTrend} disabled={previewingTrend || !exportStartDate || !exportEndDate}>
+          {previewingTrend ? 'Loading trend…' : 'Preview waste trend'}
+        </button>
         <button className="secondary-button" onClick={exportDonations} disabled={exportingDonations || !exportStartDate || !exportEndDate}>
           <Download aria-hidden="true" /> {exportingDonations ? 'Preparing…' : 'Download donations CSV'}
         </button>
+        {trendPreview.length > 0 && (
+          <div className="trend-preview">
+            <div>
+              <strong>Average waste dollars per logged day</strong>
+              <span>Ranked highest to lowest for the selected {exportGrouping === 'hour' ? 'hours' : 'dayparts'}.</span>
+            </div>
+            {trendPreview.map((bucket, index) => (
+              <div className="trend-bar-row" key={bucket.label}>
+                <span>#{index + 1} {bucket.label}</span>
+                <div className="trend-bar-track">
+                  <span style={{ width: `${Math.max(3, (bucket.averageCost / Math.max(0.01, trendPreview[0].averageCost)) * 100)}%` }} />
+                </div>
+                <strong>{formatMoney(bucket.averageCost)}</strong>
+              </div>
+            ))}
+          </div>
+        )}
         <div className="demo-data-controls">
           <div>
             <strong>Demo export data</strong>

@@ -187,17 +187,33 @@ export function distributeDollarTarget(
 
 export type WasteExportGrouping = 'hour' | 'daypart';
 
-export function buildWasteCsv(
+export interface WasteTrendBucket {
+  label: string;
+  order: number;
+  totalCost: number;
+  averageCost: number;
+  loggedDays: number;
+  entries: number;
+  products: Array<{
+    name: string;
+    quantity: number;
+    averageQuantity: number;
+    unit: 'each' | 'cups';
+    totalCost: number;
+    averageCost: number;
+    loggedDays: number;
+    entries: number;
+  }>;
+}
+
+export function buildWasteTrend(
   events: WasteEvent[],
   settings: AppSettings,
   grouping: WasteExportGrouping,
-  startDayKey: string,
-  endDayKey = startDayKey,
-  daysInRange = 1,
-): string {
+): WasteTrendBucket[] {
   const products = new Map(settings.products.map((product) => [product.id, product]));
   const dayparts = new Map(settings.dayparts.map((part, index) => [part.id, { label: part.label, order: index }]));
-  const rows = new Map<string, {
+  const productRows = new Map<string, {
     bucket: string;
     bucketOrder: number;
     productName: string;
@@ -219,7 +235,7 @@ export function buildWasteCsv(
     const bucketOrder = grouping === 'hour' ? hour : daypart?.order ?? 99;
     const key = `${bucketOrder}|${event.productId}`;
     const divisor = product?.trackingUnit === 'cup' ? (product.unitsPerCup || 14) : 1;
-    const current = rows.get(key) || {
+    const current = productRows.get(key) || {
       bucket,
       bucketOrder,
       productName: product?.name || event.productName,
@@ -233,46 +249,155 @@ export function buildWasteCsv(
     current.cost += event.equivalentUnits * event.unitCostSnapshot;
     current.entries += 1;
     current.activeDays.add(event.dayKey);
-    rows.set(key, current);
+    productRows.set(key, current);
   });
 
+  const buckets = new Map<number, {
+    label: string;
+    order: number;
+    totalCost: number;
+    entries: number;
+    activeDays: Set<string>;
+  }>();
+  events.forEach((event) => {
+    const date = eventDate(event.eventAt);
+    const hour = date.getHours();
+    const daypart = dayparts.get(event.daypartId);
+    const order = grouping === 'hour' ? hour : daypart?.order ?? 99;
+    const current = buckets.get(order) || {
+      label: grouping === 'hour'
+        ? `${String(hour).padStart(2, '0')}:00-${String(hour).padStart(2, '0')}:59`
+        : daypart?.label || event.daypartId,
+      order,
+      totalCost: 0,
+      entries: 0,
+      activeDays: new Set<string>(),
+    };
+    current.totalCost += event.equivalentUnits * event.unitCostSnapshot;
+    current.entries += 1;
+    current.activeDays.add(event.dayKey);
+    buckets.set(order, current);
+  });
+
+  return [...buckets.values()].map((bucket) => ({
+    label: bucket.label,
+    order: bucket.order,
+    totalCost: bucket.totalCost,
+    averageCost: bucket.totalCost / Math.max(1, bucket.activeDays.size),
+    loggedDays: bucket.activeDays.size,
+    entries: bucket.entries,
+    products: [...productRows.values()]
+      .filter((row) => row.bucketOrder === bucket.order)
+      .map((row) => ({
+        name: row.productName,
+        quantity: row.quantity,
+        averageQuantity: row.quantity / Math.max(1, row.activeDays.size),
+        unit: row.unit,
+        totalCost: row.cost,
+        averageCost: row.cost / Math.max(1, row.activeDays.size),
+        loggedDays: row.activeDays.size,
+        entries: row.entries,
+      }))
+      .sort((a, b) => b.averageCost - a.averageCost),
+  })).sort((a, b) => b.averageCost - a.averageCost);
+}
+
+export function buildWasteCsv(
+  events: WasteEvent[],
+  settings: AppSettings,
+  grouping: WasteExportGrouping,
+  startDayKey: string,
+  endDayKey = startDayKey,
+  daysInRange = 1,
+): string {
+  const trend = buildWasteTrend(events, settings, grouping);
+  const productTimeRanks = new Map<string, number>();
+  const productAppearances = new Map<string, Array<{ bucket: string; averageCost: number }>>();
+  trend.forEach((bucket) => bucket.products.forEach((product) => {
+    const appearances = productAppearances.get(product.name) || [];
+    appearances.push({ bucket: bucket.label, averageCost: product.averageCost });
+    productAppearances.set(product.name, appearances);
+  }));
+  productAppearances.forEach((appearances, productName) => {
+    appearances
+      .sort((a, b) => b.averageCost - a.averageCost)
+      .forEach((appearance, index) => {
+        productTimeRanks.set(`${productName}|${appearance.bucket}`, index + 1);
+      });
+  });
   const escape = (value: string | number) => {
     const text = String(value);
     return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
   };
   const lines = [[
+    'Overall time rank',
     'Range start',
     'Range end',
     grouping === 'hour' ? 'Hour' : 'Daypart',
+    'Row type',
     'Product',
-    'Total net quantity',
-    'Average quantity per logged day',
-    'Unit',
-    'Total waste dollars',
+    grouping === 'hour' ? 'Hour rank for this product' : 'Daypart rank for this product',
+    grouping === 'hour' ? 'Product rank within this hour' : 'Product rank within this daypart',
+    grouping === 'hour' ? 'Top 3 hour for this product?' : 'Top 3 daypart for this product?',
+    grouping === 'hour' ? 'Top 3 product for this hour?' : 'Top 3 product for this daypart?',
+    'Filter instructions',
     'Average waste dollars per logged day',
-    'Days with entries',
+    'Total waste dollars',
+    'Average quantity per logged day',
+    'Total net quantity',
+    'Unit',
+    'Logged days',
     'Days in range',
     'Entries',
   ]];
-  [...rows.values()]
-    .sort((a, b) => a.bucketOrder - b.bucketOrder || a.productName.localeCompare(b.productName))
-    .forEach((row) => {
-      const loggedDays = Math.max(1, row.activeDays.size);
+  trend.forEach((bucket, index) => {
+    lines.push([
+      String(index + 1),
+      startDayKey,
+      endDayKey,
+      bucket.label,
+      'All products summary',
+      'All products',
+      '',
+      '',
+      '',
+      '',
+      'Use Product detail rows. Filter a Product plus its Top 3 time column = YES, or filter an Hour/Daypart plus its Top 3 product column = YES.',
+      bucket.averageCost.toFixed(2),
+      bucket.totalCost.toFixed(2),
+      '',
+      '',
+      '',
+      String(bucket.loggedDays),
+      String(daysInRange),
+      String(bucket.entries),
+    ]);
+    bucket.products.forEach((product, productIndex) => {
+      const timeRank = productTimeRanks.get(`${product.name}|${bucket.label}`) || 0;
+      const productRank = productIndex + 1;
       lines.push([
+        String(index + 1),
         startDayKey,
         endDayKey,
-        row.bucket,
-        row.productName,
-        formatQuantity(row.quantity),
-        formatQuantity(row.quantity / loggedDays),
-        row.unit,
-        row.cost.toFixed(2),
-        (row.cost / loggedDays).toFixed(2),
-        String(row.activeDays.size),
+        bucket.label,
+        'Product detail',
+        product.name,
+        String(timeRank || ''),
+        String(productRank),
+        timeRank <= 3 ? 'YES' : '',
+        productRank <= 3 ? 'YES' : '',
+        'Filter Product and Top 3 time = YES; or filter Hour/Daypart and Top 3 product = YES.',
+        product.averageCost.toFixed(2),
+        product.totalCost.toFixed(2),
+        formatQuantity(product.averageQuantity),
+        formatQuantity(product.quantity),
+        product.unit,
+        String(product.loggedDays),
         String(daysInRange),
-        String(row.entries),
+        String(product.entries),
       ]);
     });
+  });
   return lines.map((line) => line.map(escape).join(',')).join('\r\n');
 }
 
@@ -281,30 +406,30 @@ export function buildDonationCsv(
   settings: AppSettings,
   startDayKey: string,
   endDayKey = startDayKey,
-  daysInRange = 1,
+  _daysInRange = 1,
 ): string {
-  const rows = settings.donationItems.map((item) => {
+  const configuredRows = settings.donationItems.map((item) => {
     const submitted = records.filter((record) => Object.hasOwn(record.actuals, item.id));
-    const predicted = submitted.filter((record) => record.predictions[item.id] !== null && record.predictions[item.id] !== undefined);
     const actualTotal = submitted.reduce((sum, record) => sum + (record.actuals[item.id] || 0), 0);
-    const predictedTotal = predicted.reduce((sum, record) => sum + (record.predictions[item.id] || 0), 0);
-    const variances = submitted.filter((record) => record.variance[item.id] !== null && record.variance[item.id] !== undefined);
-    const varianceTotal = variances.reduce((sum, record) => sum + (record.variance[item.id] || 0), 0);
     return {
       name: item.name,
       unit: submitted[0]?.units[item.id] || item.unit,
       actualTotal,
-      actualAverage: submitted.length ? actualTotal / submitted.length : 0,
-      predictedTotal,
-      predictedAverage: predicted.length ? predictedTotal / predicted.length : null,
-      varianceTotal,
-      varianceAverage: variances.length ? varianceTotal / variances.length : null,
-      submittedDays: submitted.length,
-      predictionDays: predicted.length,
-      initials: [...new Set(submitted.map((record) => record.initials))].join(' | '),
-      maxRevision: submitted.reduce((highest, record) => Math.max(highest, record.revision), 0),
     };
   });
+  const legacyItems = [
+    { id: 'grilled-total', name: 'Legacy Grilled Total', unit: 'lb' as const },
+    { id: 'spicy-total', name: 'Legacy Spicy Total', unit: 'lb' as const },
+    { id: 'filet-total', name: 'Legacy Filet Total', unit: 'lb' as const },
+  ];
+  const legacyRows = legacyItems
+    .filter((item) => records.some((record) => Object.hasOwn(record.actuals, item.id)))
+    .map((item) => ({
+      name: item.name,
+      unit: item.unit,
+      actualTotal: records.reduce((sum, record) => sum + (record.actuals[item.id] || 0), 0),
+    }));
+  const rows = [...configuredRows, ...legacyRows];
   const escape = (value: string | number) => {
     const text = String(value);
     return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
@@ -315,16 +440,6 @@ export function buildDonationCsv(
     'Donation item',
     'Unit',
     'Total actual',
-    'Average actual per submitted day',
-    'Total predicted',
-    'Average predicted per predicted day',
-    'Total variance',
-    'Average variance',
-    'Submitted days',
-    'Prediction days',
-    'Days in range',
-    'Initials',
-    'Highest revision',
   ]];
   rows.forEach((row) => lines.push([
     startDayKey,
@@ -332,16 +447,6 @@ export function buildDonationCsv(
     row.name,
     row.unit,
     formatQuantity(row.actualTotal),
-    formatQuantity(row.actualAverage),
-    row.predictionDays ? formatQuantity(row.predictedTotal) : '',
-    row.predictedAverage === null ? '' : formatQuantity(row.predictedAverage),
-    row.varianceAverage === null ? '' : formatQuantity(row.varianceTotal),
-    row.varianceAverage === null ? '' : formatQuantity(row.varianceAverage),
-    String(row.submittedDays),
-    String(row.predictionDays),
-    String(daysInRange),
-    row.initials,
-    String(row.maxRevision),
   ]));
   return lines.map((line) => line.map(escape).join(',')).join('\r\n');
 }

@@ -56,7 +56,7 @@ describe('domain rules', () => {
       event({ id: 'a', productId: 'filets', equivalentUnits: 2, unitCostSnapshot: 2, daypartId: 'lunch' }),
       event({ id: 'b', productId: 'filets', equivalentUnits: -1, unitCostSnapshot: 2, daypartId: 'lunch' }),
     ], DEFAULT_SETTINGS, 'daypart', '2026-07-23');
-    expect(csv).toContain('2026-07-23,2026-07-23,Lunch,Filets,1,1,each,2.00,2.00,1,1,2');
+    expect(csv).toContain('Lunch,Product detail,Filets,1,1,YES,YES');
   });
 
   it('calculates daily averages for a waste export range', () => {
@@ -64,17 +64,28 @@ describe('domain rules', () => {
       event({ id: 'a', equivalentUnits: 20, unitCostSnapshot: 2, dayKey: '2026-07-01' }),
       event({ id: 'b', equivalentUnits: 10, unitCostSnapshot: 2, dayKey: '2026-07-02' }),
     ], DEFAULT_SETTINGS, 'hour', '2026-07-01', '2026-07-30', 30);
-    expect(csv).toContain(',Filets,30,15,each,60.00,30.00,2,30,2');
+    expect(csv).toContain('Product detail,Filets,1,1,YES,YES');
   });
 
-  it('exports donation averages per submitted day', () => {
+  it('ranks both a product’s top times and a time’s top products', () => {
+    const csv = buildWasteCsv([
+      event({ id: 'a', productId: 'filets', productName: 'Filets', equivalentUnits: 5, unitCostSnapshot: 2, eventAt: new Date('2026-07-23T09:10:00') }),
+      event({ id: 'b', productId: 'filets', productName: 'Filets', equivalentUnits: 2, unitCostSnapshot: 2, eventAt: new Date('2026-07-23T10:10:00') }),
+      event({ id: 'c', productId: 'spicy', productName: 'Spicy filets', equivalentUnits: 2, unitCostSnapshot: 3, eventAt: new Date('2026-07-23T09:20:00') }),
+    ], DEFAULT_SETTINGS, 'hour', '2026-07-23');
+    expect(csv).toContain('09:00-09:59,Product detail,Filets,1,1,YES,YES');
+    expect(csv).toContain('10:00-10:59,Product detail,Filets,2,1,YES,YES');
+    expect(csv).toContain('09:00-09:59,Product detail,Spicy filets,1,2,YES,YES');
+  });
+
+  it('exports only total submitted donation actuals', () => {
     const record = (day: string, actual: number): DonationRecord => ({
       storeId: '00756',
       dayKey: day,
-      actuals: { 'filet-total': actual },
-      predictions: { 'filet-total': 2 },
-      units: { 'filet-total': 'lb' },
-      variance: { 'filet-total': actual - 2 },
+      actuals: { 'filet-donation': actual },
+      predictions: { 'filet-donation': 2 },
+      units: { 'filet-donation': 'lb' },
+      variance: { 'filet-donation': actual - 2 },
       initials: 'CL',
       submittedAt: new Date(),
       submittedBy: 'uid',
@@ -85,7 +96,7 @@ describe('domain rules', () => {
       record('2026-07-01', 4),
       record('2026-07-02', 6),
     ], DEFAULT_SETTINGS, '2026-07-01', '2026-07-30', 30);
-    expect(csv).toContain('Filet Total,lb,10,5,4,2,6,3,2,2,30,CL,1');
+    expect(csv).toContain('Filet,lb,10');
   });
 
   it('distributes a whole daypart target to the same dollar total', () => {

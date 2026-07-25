@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { User } from 'firebase/auth';
 import { observeAuth, subscribeDonationRecord, subscribeSettings, subscribeSosForDay, subscribeWasteForDay } from './data';
+import { DEFAULT_DONATION_ITEMS } from './defaults';
 import { dayKey, previousDayKey } from './domain';
 import type { AppSettings, DonationRecord, MemberProfile, SosEntry, WasteEvent } from './types';
 
@@ -99,6 +100,9 @@ export function useStoreData(storeId: string | undefined, now: Date) {
           products: value.products.map((product) => product.id === 'nuggets'
             ? { ...product, menus: ['breakfast', 'lunch'] }
             : product),
+          donationItems: DEFAULT_DONATION_ITEMS.map((defaultItem) => (
+            value.donationItems.find((item) => item.id === defaultItem.id) || defaultItem
+          )),
         } : value);
       }, handleError),
       subscribeWasteForDay(storeId, today, setTodayWaste, handleError),
