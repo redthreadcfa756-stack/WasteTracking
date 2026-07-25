@@ -21,7 +21,8 @@ service cloud.firestore {
         && request.resource.data.productId is string
         && request.resource.data.productName is string
         && request.resource.data.equivalentUnits is number
-        && request.resource.data.equivalentUnits > 0
+        && request.resource.data.equivalentUnits != 0
+        && request.resource.data.equivalentUnits >= -1000
         && request.resource.data.equivalentUnits <= 1000
         && request.resource.data.displayQuantity is number
         && request.resource.data.displayUnit in ['each', 'cup']

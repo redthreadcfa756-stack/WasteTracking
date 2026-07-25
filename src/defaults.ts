@@ -10,7 +10,7 @@ export const DEFAULT_PRODUCTS: ProductConfig[] = [
   { id: 'breakfast-spicy', name: 'Breakfast spicy', menus: ['breakfast'], unitCost: 1.95, averageWeightLb: 0.35, tapQuantity: 1, trackingUnit: 'each', tone: 1 },
   { id: 'filets', name: 'Filets', menus: ['lunch'], unitCost: 2.35, averageWeightLb: 0.5, tapQuantity: 1, trackingUnit: 'each', tone: 1 },
   { id: 'spicy', name: 'Spicy filets', menus: ['lunch'], unitCost: 2.45, averageWeightLb: 0.5, tapQuantity: 1, trackingUnit: 'each', tone: 2 },
-  { id: 'nuggets', name: 'Nuggets', menus: ['lunch'], unitCost: 0.48, averageWeightLb: 0.04, tapQuantity: 14, trackingUnit: 'cup', unitsPerCup: 14, tone: 3 },
+  { id: 'nuggets', name: 'Nuggets', menus: ['breakfast', 'lunch'], unitCost: 0.48, averageWeightLb: 0.04, tapQuantity: 14, trackingUnit: 'cup', unitsPerCup: 14, tone: 3 },
   { id: 'strips', name: 'Strips', menus: ['lunch'], unitCost: 1.18, averageWeightLb: 0.12, tapQuantity: 1, trackingUnit: 'each', tone: 4 },
   { id: 'grilled-nuggets', name: 'Grilled nuggets', menus: ['lunch'], unitCost: 0.62, averageWeightLb: 0.04, tapQuantity: 1, trackingUnit: 'each', tone: 5 },
   { id: 'grilled-filets', name: 'Grilled filets', menus: ['lunch'], unitCost: 3.1, averageWeightLb: 0.45, tapQuantity: 1, trackingUnit: 'each', tone: 6 },
@@ -40,7 +40,7 @@ const targets = (entries: Record<string, number>) => entries;
 export const DEFAULT_DAYPARTS: DaypartConfig[] = [
   {
     id: 'breakfast', label: 'Breakfast', startMinutes: 390, endMinutes: 630, menu: 'breakfast', totalDollarTarget: 27.15,
-    productTargetQuantities: targets({ 'grilled-breakfast': 3, sausage: 4, 'folded-yellow': 5, 'folded-white': 3, scrambled: 4, 'breakfast-filets': 3, 'breakfast-spicy': 2 }),
+    productTargetQuantities: targets({ 'grilled-breakfast': 3, sausage: 4, 'folded-yellow': 5, 'folded-white': 3, scrambled: 4, 'breakfast-filets': 3, 'breakfast-spicy': 2, nuggets: 0 }),
   },
   {
     id: 'lunch', label: 'Lunch', startMinutes: 630, endMinutes: 840, menu: 'lunch', totalDollarTarget: 50.95,

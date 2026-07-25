@@ -280,6 +280,7 @@ code { font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.9em; }
 .data-table td { font-size: 0.88rem; }
 .table-input { min-width: 92px; min-height: 38px; padding: 0.45rem 0.55rem; border-radius: 9px; }
 .table-input:disabled { opacity: 1; border-color: transparent; background: transparent; }
+.calculated-value { display: inline-flex; min-height: 38px; align-items: center; font-weight: 750; }
 .cell-detail { display: block; margin-top: 0.2rem; color: var(--muted); font-size: 0.72rem; }
 
 .donation-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; color: var(--muted); font-size: 0.85rem; }
@@ -581,6 +582,32 @@ label,
   gap: 0.65rem;
 }
 
+.waste-card-wrap {
+  display: grid;
+  align-content: start;
+  gap: 0.4rem;
+}
+
+.waste-card-wrap .waste-card {
+  width: 100%;
+}
+
+.individual-nuggets-button {
+  min-height: 38px;
+  border: 1px solid #b42335;
+  border-radius: 0;
+  background: #fff;
+  color: #8f1729;
+  font-family: "Space Grotesk", Inter, sans-serif;
+  font-size: 0.75rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.individual-nuggets-button:hover {
+  background: #fff2f4;
+}
+
 .waste-card {
   min-height: 172px;
   padding: 1rem;
@@ -593,6 +620,16 @@ label,
 
 .waste-card:hover {
   background: #f8fcff;
+}
+
+.waste-card.is-holding {
+  border-color: #b42335;
+  box-shadow: inset 0 0 0 2px #b42335;
+  transform: scale(0.985);
+}
+
+.waste-card.is-holding .waste-circle {
+  background: #b42335;
 }
 
 .waste-card-top {

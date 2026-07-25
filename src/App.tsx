@@ -1,6 +1,5 @@
 import {
   AlertTriangle,
-  BarChart3,
   Check,
   ChevronRight,
   Clock3,
@@ -32,7 +31,6 @@ import {
   dayKey,
   detectDaypart,
   displayProductQuantity,
-  distributeDollarTarget,
   donationPrediction,
   formatDuration,
   formatMoney,
@@ -329,9 +327,9 @@ function WasteTab({
   const merged = mergeActivity(menuEvents, settings.products);
   const totalCost = menuEvents.reduce((sum, event) => sum + event.equivalentUnits * event.unitCostSnapshot, 0);
 
-  const addWaste = async (product: ProductConfig, equivalentUnits: number) => {
-    const isCup = product.trackingUnit === 'cup' && equivalentUnits === (product.unitsPerCup || 14);
-    const displayQuantity = isCup ? 1 : equivalentUnits;
+  const adjustWaste = async (product: ProductConfig, equivalentUnits: number) => {
+    const isCup = product.trackingUnit === 'cup' && Math.abs(equivalentUnits) === (product.unitsPerCup || 14);
+    const displayQuantity = isCup ? Math.sign(equivalentUnits) : equivalentUnits;
     const displayUnit = isCup ? 'cup' : 'each';
     setBusyProduct(product.id);
     try {
@@ -359,6 +357,15 @@ function WasteTab({
     } finally {
       setBusyProduct('');
     }
+  };
+
+  const subtractWaste = (product: ProductConfig, totalUnits: number) => {
+    if (totalUnits <= 0) {
+      notify(`No ${product.name} waste to subtract.`);
+      return;
+    }
+    const adjustment = Math.min(product.tapQuantity, totalUnits);
+    void adjustWaste(product, -adjustment);
   };
 
   const undoLast = async () => {
@@ -399,15 +406,25 @@ function WasteTab({
         {products.map((product) => {
           const totals = productWaste(menuEvents, product.id);
           return (
-            <WasteCard
-              key={product.id}
-              product={product}
-              totalUnits={totals.units}
-              totalCost={totals.cost}
-              busy={busyProduct === product.id}
-              onAdd={() => addWaste(product, product.tapQuantity)}
-              onIndividual={() => setNuggetPicker(product)}
-            />
+            <div className="waste-card-wrap" key={product.id}>
+              <WasteCard
+                product={product}
+                totalUnits={totals.units}
+                totalCost={totals.cost}
+                busy={busyProduct === product.id}
+                onAdd={() => adjustWaste(product, product.tapQuantity)}
+                onSubtract={() => subtractWaste(product, totals.units)}
+              />
+              {product.trackingUnit === 'cup' && (
+                <button
+                  className="individual-nuggets-button"
+                  disabled={busyProduct === product.id}
+                  onClick={() => setNuggetPicker(product)}
+                >
+                  Add individual nuggets
+                </button>
+              )}
+            </div>
           );
         })}
       </div>
@@ -439,55 +456,59 @@ function WasteTab({
       </div>
 
       {nuggetPicker && (
-        <Modal title="Waste individual nuggets" onClose={() => setNuggetPicker(null)}>
-          <p>Choose the number of nuggets. The app saves it as a partial cup using 14 nuggets per cup.</p>
+        <Modal title="Add individual nuggets" onClose={() => setNuggetPicker(null)}>
+          <p>Choose how many individual nuggets to add. Fourteen nuggets equals one cup.</p>
           <div className="number-grid">
             {Array.from({ length: 13 }, (_, index) => index + 1).map((count) => (
               <button key={count} onClick={() => {
-                addWaste(nuggetPicker, count);
+                void adjustWaste(nuggetPicker, count);
                 setNuggetPicker(null);
               }}>{count}</button>
             ))}
           </div>
         </Modal>
       )}
+
     </section>
   );
 }
 
-function WasteCard({ product, totalUnits, totalCost, busy, onAdd, onIndividual }: {
+function WasteCard({ product, totalUnits, totalCost, busy, onAdd, onSubtract }: {
   product: ProductConfig;
   totalUnits: number;
   totalCost: number;
   busy: boolean;
   onAdd: () => void;
-  onIndividual: () => void;
+  onSubtract: () => void;
 }) {
   const timer = useRef<number | null>(null);
   const longPressed = useRef(false);
-  const canLongPress = product.trackingUnit === 'cup';
+  const [holding, setHolding] = useState(false);
 
   const startPress = () => {
     longPressed.current = false;
-    if (!canLongPress) return;
+    setHolding(true);
     timer.current = window.setTimeout(() => {
       longPressed.current = true;
-      onIndividual();
-      navigator.vibrate?.(30);
-    }, 550);
+      setHolding(false);
+      onSubtract();
+      navigator.vibrate?.(40);
+    }, 650);
   };
   const endPress = () => {
     if (timer.current) window.clearTimeout(timer.current);
     timer.current = null;
+    setHolding(false);
   };
 
   return (
     <button
-      className={`waste-card tone-${product.tone}`}
+      className={`waste-card tone-${product.tone}${holding ? ' is-holding' : ''}`}
       disabled={busy}
       onPointerDown={startPress}
       onPointerUp={endPress}
       onPointerCancel={endPress}
+      onPointerLeave={endPress}
       onContextMenu={(event) => event.preventDefault()}
       onClick={() => {
         if (longPressed.current) {
@@ -498,12 +519,12 @@ function WasteCard({ product, totalUnits, totalCost, busy, onAdd, onIndividual }
       }}
     >
       <span className="waste-card-top">
-        <span className="waste-circle">+</span>
+        <span className="waste-circle">{holding ? '−' : '+'}</span>
         <span>{product.name}</span>
       </span>
       <span className="waste-total">{displayProductQuantity(product, totalUnits)}</span>
       <span>{formatMoney(totalCost)} wasted</span>
-      <span className="waste-hint">{canLongPress ? 'Tap 1 cup · Hold for individual' : `${formatMoney(product.unitCost)} each`}</span>
+      <span className="waste-hint">Tap to add · Hold to subtract</span>
     </button>
   );
 }
@@ -786,21 +807,40 @@ function AdminTab({ settings, storeId, deviceName, notify }: {
   const daypartIndex = draft.dayparts.findIndex((part) => part.id === selectedDaypart);
   const daypart = draft.dayparts[daypartIndex];
   const products = draft.products.filter((product) => product.menus.includes(daypart.menu));
+  const calculatedDaypartTarget = products.reduce((total, product) => (
+    total + targetDollarForProduct(product, daypart.productTargetQuantities[product.id] || 0)
+  ), 0);
 
   const updateProduct = (productId: string, patch: Partial<ProductConfig>) => {
-    setDraft((current) => ({
-      ...current,
-      products: current.products.map((product) => product.id === productId ? { ...product, ...patch } : product),
-    }));
-  };
-  const updateDaypart = (patch: Partial<typeof daypart>) => {
-    setDraft((current) => ({
-      ...current,
-      dayparts: current.dayparts.map((part) => part.id === selectedDaypart ? { ...part, ...patch } : part),
-    }));
+    setDraft((current) => {
+      const nextProducts = current.products.map((product) => product.id === productId ? { ...product, ...patch } : product);
+      return {
+        ...current,
+        products: nextProducts,
+        dayparts: current.dayparts.map((part) => ({
+          ...part,
+          totalDollarTarget: nextProducts
+            .filter((product) => product.menus.includes(part.menu))
+            .reduce((total, product) => total + targetDollarForProduct(product, part.productTargetQuantities[product.id] || 0), 0),
+        })),
+      };
+    });
   };
   const updateQuantity = (productId: string, quantity: number) => {
-    updateDaypart({ productTargetQuantities: { ...daypart.productTargetQuantities, [productId]: Math.max(0, quantity) } });
+    setDraft((current) => ({
+      ...current,
+      dayparts: current.dayparts.map((part) => {
+        if (part.id !== selectedDaypart) return part;
+        const productTargetQuantities = {
+          ...part.productTargetQuantities,
+          [productId]: Math.max(0, quantity),
+        };
+        const totalDollarTarget = current.products
+          .filter((product) => product.menus.includes(part.menu))
+          .reduce((total, product) => total + targetDollarForProduct(product, productTargetQuantities[product.id] || 0), 0);
+        return { ...part, productTargetQuantities, totalDollarTarget };
+      }),
+    }));
   };
 
   const save = async () => {
@@ -824,10 +864,7 @@ function AdminTab({ settings, storeId, deviceName, notify }: {
       </div>
       <div className="admin-strip">
         <label>Daypart<select value={selectedDaypart} onChange={(event) => setSelectedDaypart(event.target.value as DaypartId)}>{draft.dayparts.map((part) => <option value={part.id} key={part.id}>{part.label} · {formatMinutes(part.startMinutes)}–{formatMinutes(part.endMinutes)}</option>)}</select></label>
-        <label>Whole daypart target<input type="number" min="0" step="0.01" value={daypart.totalDollarTarget} onChange={(event) => updateDaypart({ totalDollarTarget: Number(event.target.value) || 0 })} /></label>
-        <button className="secondary-button" onClick={() => updateDaypart({
-          productTargetQuantities: distributeDollarTarget(products, daypart, daypart.totalDollarTarget),
-        })}><BarChart3 /> Break down target</button>
+        <label>Whole daypart target<input type="number" value={calculatedDaypartTarget.toFixed(2)} readOnly /></label>
         <label>This device name<input value={device} onChange={(event) => setDevice(event.target.value)} /></label>
       </div>
       <div className="data-table-wrap">
@@ -843,14 +880,17 @@ function AdminTab({ settings, storeId, deviceName, notify }: {
                   <td><input className="table-input" type="number" min="0.01" step="0.01" value={product.unitCost} onChange={(event) => updateProduct(product.id, { unitCost: Number(event.target.value) || 0 })} /></td>
                   <td><input className="table-input" type="number" min="0.001" step="0.01" value={product.averageWeightLb} onChange={(event) => updateProduct(product.id, { averageWeightLb: Number(event.target.value) || 0 })} /></td>
                   <td><input className="table-input" type="number" min="0" step="0.01" value={formatQuantity(quantity)} onChange={(event) => updateQuantity(product.id, Number(event.target.value) || 0)} /></td>
-                  <td><input className="table-input" type="number" min="0" step="0.01" value={targetDollars.toFixed(2)} onChange={(event) => {
-                    const costPerTargetUnit = product.unitCost * (product.trackingUnit === 'cup' ? (product.unitsPerCup || product.tapQuantity) : 1);
-                    updateQuantity(product.id, costPerTargetUnit > 0 ? (Number(event.target.value) || 0) / costPerTargetUnit : 0);
-                  }} /></td>
+                  <td><output className="calculated-value">{formatMoney(targetDollars)}</output></td>
                 </tr>
               );
             })}
           </tbody>
+          <tfoot>
+            <tr>
+              <td colSpan={4}><strong>Whole daypart target</strong></td>
+              <td><strong>{formatMoney(calculatedDaypartTarget)}</strong></td>
+            </tr>
+          </tfoot>
         </table>
       </div>
       <p className="footnote">Over-target alerts are muted for {draft.warningCooldownSeconds} seconds after dismissal. Donation predictions use the saved average weights.</p>

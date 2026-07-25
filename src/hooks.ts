@@ -94,7 +94,12 @@ export function useStoreData(storeId: string | undefined, now: Date) {
     };
     const subscriptions = [
       subscribeSettings(storeId, (value) => {
-        setSettings(value);
+        setSettings(value ? {
+          ...value,
+          products: value.products.map((product) => product.id === 'nuggets'
+            ? { ...product, menus: ['breakfast', 'lunch'] }
+            : product),
+        } : value);
       }, handleError),
       subscribeWasteForDay(storeId, today, setTodayWaste, handleError),
       subscribeWasteForDay(storeId, previous, setPreviousWaste, handleError),
