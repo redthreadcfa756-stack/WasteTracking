@@ -76,7 +76,7 @@ function confirmWrite<T>(write: Promise<T>): Promise<T> {
 const TABS: Array<{ id: TabId; label: string; icon: typeof Trash2 }> = [
   { id: 'waste', label: 'Waste', icon: Trash2 },
   { id: 'sos', label: 'SOS', icon: Timer },
-  { id: 'donations', label: 'Shared Table', icon: Gift },
+  { id: 'donations', label: 'Donations', icon: Gift },
   { id: 'admin', label: 'Admin', icon: Settings },
 ];
 
@@ -704,7 +704,7 @@ function DonationsTab({ settings, previousWaste, currentWaste, existing, member,
       <div className="section-heading">
         <div>
           <p className="eyebrow">Yesterday Lunch–Late Dinner + today Breakfast</p>
-          <h2>Shared Table reconciliation</h2>
+          <h2>Donations reconciliation</h2>
         </div>
         {existing && <span className="status-badge"><Check aria-hidden="true" /> Submitted · revision {existing.revision}</span>}
       </div>
@@ -939,24 +939,18 @@ function AdminTab({ settings, storeId, deviceName, notify }: {
         <button className="primary-button" onClick={save} disabled={saving}><Save /> {saving ? 'Saving…' : 'Save all changes'}</button>
       </div>
       <div className="admin-strip">
-        <label>Daypart<select value={selectedDaypart} onChange={(event) => setSelectedDaypart(event.target.value as DaypartId)}>{draft.dayparts.map((part) => <option value={part.id} key={part.id}>{part.label} · {formatMinutes(part.startMinutes)}–{formatMinutes(part.endMinutes)}</option>)}</select></label>
-        <label>Whole daypart target<input type="number" value={calculatedDaypartTarget.toFixed(2)} readOnly /></label>
         <label>This device name<input value={device} onChange={(event) => setDevice(event.target.value)} /></label>
       </div>
-      <div className="section-heading activity-heading">
-        <div>
-          <p className="eyebrow">Shared {daypart.menu} menu values</p>
-          <h3>Product costs and weights</h3>
-        </div>
-      </div>
+      <details className="admin-dropdown">
+        <summary>Donations · Product unit costs and weights</summary>
       <div className="data-table-wrap">
         <table className="data-table admin-table">
           <thead><tr><th>Product</th><th>Unit cost</th><th>Avg lb/unit</th></tr></thead>
           <tbody>
-            {products.map((product) => {
+            {draft.products.map((product) => {
               return (
                 <tr key={product.id}>
-                  <td><strong>{product.name}</strong><span className="cell-detail">Shared across every {daypart.menu} daypart</span></td>
+                  <td><strong>{product.name}</strong><span className="cell-detail">Used for waste cost and donation estimates</span></td>
                   <td><input className="table-input" type="number" min="0.01" step="0.01" value={product.unitCost} onChange={(event) => updateProduct(product.id, { unitCost: Number(event.target.value) || 0 })} /></td>
                   <td><input className="table-input" type="number" min="0.001" step="0.01" value={product.averageWeightLb} onChange={(event) => updateProduct(product.id, { averageWeightLb: Number(event.target.value) || 0 })} /></td>
                 </tr>
@@ -965,12 +959,13 @@ function AdminTab({ settings, storeId, deviceName, notify }: {
           </tbody>
         </table>
       </div>
-      <div className="section-heading activity-heading">
-        <div>
-          <p className="eyebrow">{daypart.label}</p>
-          <h3>Daypart targets</h3>
+      </details>
+      <details className="admin-dropdown">
+        <summary>Daypart targets · {daypart.label}</summary>
+        <div className="admin-strip">
+          <label>Daypart<select value={selectedDaypart} onChange={(event) => setSelectedDaypart(event.target.value as DaypartId)}>{draft.dayparts.map((part) => <option value={part.id} key={part.id}>{part.label} · {formatMinutes(part.startMinutes)}–{formatMinutes(part.endMinutes)}</option>)}</select></label>
+          <label>Whole daypart target<input type="number" value={calculatedDaypartTarget.toFixed(2)} readOnly /></label>
         </div>
-      </div>
       <div className="data-table-wrap">
         <table className="data-table admin-table">
           <thead><tr><th>Product</th><th>Target quantity</th><th>Target dollars</th></tr></thead>
@@ -995,6 +990,7 @@ function AdminTab({ settings, storeId, deviceName, notify }: {
           </tfoot>
         </table>
       </div>
+      </details>
       <div className="export-panel">
         <div>
           <p className="eyebrow">CSV export</p>
@@ -1006,6 +1002,10 @@ function AdminTab({ settings, storeId, deviceName, notify }: {
           <input type="date" value={exportStartDate} readOnly />
         </label>
         <label>
+          Ending date
+          <input type="date" value={exportEndDate} onChange={(event) => updateExportDates(exportDays, event.target.value)} />
+        </label>
+        <label>
           Period
           <select value={exportDays} onChange={(event) => updateExportDates(Number(event.target.value) as 1 | 30 | 60 | 90, exportEndDate)}>
             <option value={1}>Selected day</option>
@@ -1013,10 +1013,6 @@ function AdminTab({ settings, storeId, deviceName, notify }: {
             <option value={60}>Current 60 days</option>
             <option value={90}>Current 90 days</option>
           </select>
-        </label>
-        <label>
-          Ending date
-          <input type="date" value={exportEndDate} onChange={(event) => updateExportDates(exportDays, event.target.value)} />
         </label>
         <label>
           Aggregate by
