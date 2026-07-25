@@ -63,6 +63,7 @@ import type {
 
 type TabId = 'waste' | 'sos' | 'donations' | 'admin';
 type MenuSelection = 'auto' | MenuId;
+type ExportPeriod = 1 | 30 | 60 | 90 | 'custom';
 const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || '00756';
 const WRITE_TIMEOUT_MS = 8_000;
 
@@ -836,7 +837,7 @@ function AdminTab({ settings, storeId, deviceName, notify }: {
   const [device, setDevice] = useState(deviceName);
   const [exportStartDate, setExportStartDate] = useState(dayKey());
   const [exportEndDate, setExportEndDate] = useState(dayKey());
-  const [exportDays, setExportDays] = useState<1 | 30 | 60 | 90>(1);
+  const [exportPeriod, setExportPeriod] = useState<ExportPeriod>(1);
   const [exportGrouping, setExportGrouping] = useState<WasteExportGrouping>('hour');
   const [exporting, setExporting] = useState(false);
   const [exportingDonations, setExportingDonations] = useState(false);
@@ -895,21 +896,34 @@ function AdminTab({ settings, storeId, deviceName, notify }: {
     }
   };
 
-  const updateExportDates = (days: 1 | 30 | 60 | 90, endingDate: string) => {
-    setExportDays(days);
+  const updateExportDates = (period: ExportPeriod, endingDate: string) => {
+    setExportPeriod(period);
     setExportEndDate(endingDate);
+    if (period === 'custom') return;
     if (!endingDate) {
       setExportStartDate('');
       return;
     }
     const startDate = new Date(`${endingDate}T12:00:00`);
-    startDate.setDate(startDate.getDate() - (days - 1));
+    startDate.setDate(startDate.getDate() - (period - 1));
     setExportStartDate(dayKey(startDate));
+  };
+
+  const selectedExportDays = () => {
+    const start = Date.parse(`${exportStartDate}T00:00:00Z`);
+    const end = Date.parse(`${exportEndDate}T00:00:00Z`);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start > end) return null;
+    return Math.round((end - start) / 86_400_000) + 1;
   };
 
   const exportWaste = async () => {
     setExporting(true);
     try {
+      const exportDays = selectedExportDays();
+      if (!exportDays) {
+        notify('Choose a starting date that is on or before the ending date.');
+        return;
+      }
       const events = await loadWasteForDateRange(storeId, exportStartDate, exportEndDate);
       if (events.length === 0) {
         notify(`No waste data was found from ${exportStartDate} through ${exportEndDate}.`);
@@ -938,6 +952,11 @@ function AdminTab({ settings, storeId, deviceName, notify }: {
   const exportDonations = async () => {
     setExportingDonations(true);
     try {
+      const exportDays = selectedExportDays();
+      if (!exportDays) {
+        notify('Choose a starting date that is on or before the ending date.');
+        return;
+      }
       const records = await loadDonationRecordsForDateRange(storeId, exportStartDate, exportEndDate);
       if (records.length === 0) {
         notify(`No submitted donation data was found from ${exportStartDate} through ${exportEndDate}.`);
@@ -1030,19 +1049,32 @@ function AdminTab({ settings, storeId, deviceName, notify }: {
         </div>
         <label>
           Starting date
-          <input type="date" value={exportStartDate} readOnly />
+          <input type="date" value={exportStartDate} onChange={(event) => {
+            setExportStartDate(event.target.value);
+            setExportPeriod('custom');
+          }} />
         </label>
         <label>
           Ending date
-          <input type="date" value={exportEndDate} onChange={(event) => updateExportDates(exportDays, event.target.value)} />
+          <input type="date" value={exportEndDate} onChange={(event) => {
+            if (exportPeriod === 'custom') {
+              setExportEndDate(event.target.value);
+            } else {
+              updateExportDates(exportPeriod, event.target.value);
+            }
+          }} />
         </label>
         <label>
           Period
-          <select value={exportDays} onChange={(event) => updateExportDates(Number(event.target.value) as 1 | 30 | 60 | 90, exportEndDate)}>
+          <select value={exportPeriod} onChange={(event) => {
+            const value = event.target.value;
+            updateExportDates(value === 'custom' ? 'custom' : Number(value) as 1 | 30 | 60 | 90, exportEndDate);
+          }}>
             <option value={1}>Selected day</option>
             <option value={30}>Current 30 days</option>
             <option value={60}>Current 60 days</option>
             <option value={90}>Current 90 days</option>
+            <option value="custom">Custom range</option>
           </select>
         </label>
         <label>
