@@ -225,10 +225,21 @@ export async function seedExportDemoData(
   deviceName: string,
 ): Promise<void> {
   const services = requireFirebase();
-  const batch = writeBatch(services.db);
-  const breakfastProducts = settings.products.filter((product) => product.menus.includes('breakfast'));
-  const lunchProducts = settings.products.filter((product) => product.menus.includes('lunch'));
+  let batch = writeBatch(services.db);
+  let batchSize = 0;
+  const flushBatch = async () => {
+    if (batchSize === 0) return;
+    await batch.commit();
+    batch = writeBatch(services.db);
+    batchSize = 0;
+  };
+  const queueSet = async (reference: Parameters<typeof batch.set>[0], data: Parameters<typeof batch.set>[1]) => {
+    batch.set(reference, data);
+    batchSize += 1;
+    if (batchSize >= 450) await flushBatch();
+  };
   const today = new Date();
+  const fullMatrixOffsets = new Set([0, 7, 14, 21, 29]);
 
   for (let offset = 0; offset < 30; offset += 1) {
     const date = new Date(today);
@@ -239,24 +250,29 @@ export async function seedExportDemoData(
       String(date.getMonth() + 1).padStart(2, '0'),
       String(date.getDate()).padStart(2, '0'),
     ].join('-');
-    const samples = [
-      { product: breakfastProducts[offset % Math.max(1, breakfastProducts.length)], hour: 8, daypartId: 'breakfast' as const, menu: 'breakfast' as const },
-      { product: lunchProducts[offset % Math.max(1, lunchProducts.length)], hour: 12, daypartId: 'lunch' as const, menu: 'lunch' as const },
-      { product: lunchProducts[(offset + 2) % Math.max(1, lunchProducts.length)], hour: 15, daypartId: 'afternoon' as const, menu: 'lunch' as const },
-      { product: lunchProducts[(offset + 4) % Math.max(1, lunchProducts.length)], hour: 18, daypartId: 'early-dinner' as const, menu: 'lunch' as const },
-    ].filter((sample) => sample.product);
-    samples.forEach((sample, sampleIndex) => {
+    const samples = fullMatrixOffsets.has(offset)
+      ? settings.products.flatMap((product) => Array.from({ length: 16 }, (_, hourIndex) => {
+        const hour = hourIndex + 6;
+        const daypart = settings.dayparts.find((part) => (
+          hour * 60 >= part.startMinutes && hour * 60 < part.endMinutes
+        )) || settings.dayparts[settings.dayparts.length - 1];
+        return { product, hour, daypartId: daypart.id, menu: product.menus[0] };
+      }))
+      : [];
+    for (let sampleIndex = 0; sampleIndex < samples.length; sampleIndex += 1) {
+      const sample = samples[sampleIndex];
       const eventAt = new Date(date);
       eventAt.setHours(sample.hour, 10 + (offset % 35), 0, 0);
+      const displayQuantity = 1 + ((sample.hour * 3 + sampleIndex * 2 + offset) % 8);
       const quantity = sample.product.trackingUnit === 'cup'
-        ? (sample.product.unitsPerCup || sample.product.tapQuantity)
-        : 1 + ((offset + sampleIndex) % 3);
-      batch.set(doc(services.db, 'stores', storeId, 'exportDemoWaste', `${selectedDayKey}_${sampleIndex}`), {
+        ? displayQuantity * (sample.product.unitsPerCup || sample.product.tapQuantity)
+        : displayQuantity;
+      await queueSet(doc(services.db, 'stores', storeId, 'exportDemoWaste', `${selectedDayKey}_${sampleIndex}`), {
         storeId,
         productId: sample.product.id,
         productName: sample.product.name,
         equivalentUnits: quantity,
-        displayQuantity: sample.product.trackingUnit === 'cup' ? 1 : quantity,
+        displayQuantity,
         displayUnit: sample.product.trackingUnit === 'cup' ? 'cup' : 'each',
         unitCostSnapshot: sample.product.unitCost,
         eventAt,
@@ -267,7 +283,7 @@ export async function seedExportDemoData(
         createdBy,
         createdByName,
       });
-    });
+    }
     const actuals = Object.fromEntries(settings.donationItems.map((item, index) => [
       item.id,
       Number((((offset + index) % 7 + 1) * (item.unit === 'lb' ? 0.45 : 1)).toFixed(2)),
@@ -276,7 +292,7 @@ export async function seedExportDemoData(
       item.id,
       Number(((actuals[item.id] || 0) * 0.9).toFixed(2)),
     ]));
-    batch.set(doc(services.db, 'stores', storeId, 'exportDemoDonations', selectedDayKey), {
+    await queueSet(doc(services.db, 'stores', storeId, 'exportDemoDonations', selectedDayKey), {
       storeId,
       dayKey: selectedDayKey,
       actuals,
@@ -293,7 +309,7 @@ export async function seedExportDemoData(
       revision: 1,
     });
   }
-  await batch.commit();
+  await flushBatch();
 }
 
 export async function removeExportDemoData(storeId: string): Promise<void> {
@@ -302,10 +318,15 @@ export async function removeExportDemoData(storeId: string): Promise<void> {
     getDocs(collection(services.db, 'stores', storeId, 'exportDemoWaste')),
     getDocs(collection(services.db, 'stores', storeId, 'exportDemoDonations')),
   ]);
-  const batch = writeBatch(services.db);
-  waste.docs.forEach((snapshot) => batch.delete(snapshot.ref));
-  donations.docs.forEach((snapshot) => batch.delete(snapshot.ref));
-  await batch.commit();
+  const references = [
+    ...waste.docs.map((snapshot) => snapshot.ref),
+    ...donations.docs.map((snapshot) => snapshot.ref),
+  ];
+  for (let start = 0; start < references.length; start += 450) {
+    const batch = writeBatch(services.db);
+    references.slice(start, start + 450).forEach((reference) => batch.delete(reference));
+    await batch.commit();
+  }
 }
 
 export async function saveDonationRecord(record: Omit<DonationRecord, 'submittedAt'>): Promise<void> {
