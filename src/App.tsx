@@ -134,6 +134,67 @@ function playCooldownAlarm() {
   }
 }
 
+function CooldownTimerItem({
+  panLabel,
+  timer,
+  now,
+  onCancel,
+}: {
+  panLabel: string;
+  timer?: CooldownTimer;
+  now: number;
+  onCancel: () => void;
+}) {
+  const holdTimer = useRef<number | null>(null);
+  const [holding, setHolding] = useState(false);
+  const remainingMs = timer ? Math.max(0, timestampMillis(timer.expiresAt) - now) : 0;
+  const remainingSeconds = Math.ceil(remainingMs / 1_000);
+  const remainingPercent = timer ? Math.min(100, (remainingMs / (60 * 60 * 1000)) * 100) : 0;
+
+  useEffect(() => () => {
+    if (holdTimer.current) window.clearTimeout(holdTimer.current);
+  }, []);
+
+  const cancelHold = () => {
+    if (holdTimer.current) window.clearTimeout(holdTimer.current);
+    holdTimer.current = null;
+    setHolding(false);
+  };
+  const startHold = () => {
+    if (!timer) return;
+    setHolding(true);
+    holdTimer.current = window.setTimeout(() => {
+      holdTimer.current = null;
+      setHolding(false);
+      navigator.vibrate?.(50);
+      onCancel();
+    }, 900);
+  };
+
+  return (
+    <button
+      type="button"
+      className={`cooldown-strip-item ${timer ? 'active' : ''}${holding ? ' is-holding' : ''}`}
+      disabled={!timer}
+      aria-label={timer ? `${panLabel}, ${formatDuration(remainingSeconds)} remaining. Hold to cancel.` : `${panLabel}, ready`}
+      title={timer ? 'Hold to cancel this timer' : 'Ready for the next waste entry'}
+      onPointerDown={startHold}
+      onPointerUp={cancelHold}
+      onPointerCancel={cancelHold}
+      onPointerLeave={cancelHold}
+      onContextMenu={(event) => event.preventDefault()}
+    >
+      <div>
+        <span>{panLabel}</span>
+        <strong>{timer ? formatDuration(remainingSeconds) : 'Ready'}</strong>
+      </div>
+      <div className="cooldown-progress" aria-hidden="true">
+        <span style={{ width: `${remainingPercent}%` }} />
+      </div>
+    </button>
+  );
+}
+
 const TABS: Array<{ id: TabId; label: string; icon: typeof Trash2 }> = [
   { id: 'waste', label: 'Waste', icon: Trash2 },
   { id: 'sos', label: 'SOS', icon: Timer },
@@ -286,6 +347,15 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
     }
   };
 
+  const cancelCooldownTimer = async (timer: CooldownTimer) => {
+    try {
+      await resetCooldownTimer(member.storeId, timer.id);
+      notify(`${timer.panLabel} timer canceled.`);
+    } catch (caught) {
+      notify(errorMessage(caught));
+    }
+  };
+
   const selectTab = (tab: TabId) => {
     if (tab === activeTab) return;
     if (tab === 'admin') {
@@ -323,19 +393,14 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
         <section className="cooldown-strip" aria-label="Cooldown pan timers">
           {COOLDOWN_PANS.map((pan) => {
             const timer = storeData.cooldownTimers.find((candidate) => candidate.id === pan.id && candidate.active);
-            const remainingMs = timer ? Math.max(0, timestampMillis(timer.expiresAt) - timerNow) : 0;
-            const remainingSeconds = Math.ceil(remainingMs / 1_000);
-            const remainingPercent = timer ? Math.min(100, (remainingMs / (60 * 60 * 1000)) * 100) : 0;
             return (
-              <div className={`cooldown-strip-item ${timer ? 'active' : ''}`} key={pan.id}>
-                <div>
-                  <span>{pan.label}</span>
-                  <strong>{timer ? formatDuration(remainingSeconds) : 'Ready'}</strong>
-                </div>
-                <div className="cooldown-progress" aria-hidden="true">
-                  <span style={{ width: `${remainingPercent}%` }} />
-                </div>
-              </div>
+              <CooldownTimerItem
+                key={pan.id}
+                panLabel={pan.label}
+                timer={timer}
+                now={timerNow}
+                onCancel={() => timer && void cancelCooldownTimer(timer)}
+              />
             );
           })}
         </section>
