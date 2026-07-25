@@ -1102,10 +1102,10 @@ function AdminTab({ settings, member, deviceName, notify }: {
         </table>
       </div>
       </details>
-      <div className="export-panel">
+      <details className="admin-dropdown">
+        <summary>Export reports</summary>
+        <div className="export-panel">
         <div>
-          <p className="eyebrow">Excel export</p>
-          <h3>Export reports</h3>
           <p>Download waste trends or submitted donation totals and averages for the selected range.</p>
         </div>
         <label>
@@ -1183,7 +1183,8 @@ function AdminTab({ settings, member, deviceName, notify }: {
             Remove demo data
           </button>
         </div>
-      </div>
+        </div>
+      </details>
       <p className="footnote">Over-target alerts are muted for {draft.warningCooldownSeconds} seconds after dismissal. Donation predictions use the saved average weights.</p>
     </section>
   );
