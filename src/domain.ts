@@ -50,6 +50,14 @@ export function parseDuration(value: string): number | null {
   return match ? Number(match[1]) * 60 + Number(match[2]) : null;
 }
 
+export function formatDurationInput(value: string): string {
+  const digits = value.replace(/\D/g, '').slice(0, 4);
+  if (!digits) return '';
+  if (digits.length <= 2) return `0:${digits.padStart(2, '0')}`;
+  const minutes = String(Number(digits.slice(0, -2)));
+  return `${minutes}:${digits.slice(-2)}`;
+}
+
 export function eventDate(value: WasteEvent['eventAt']): Date {
   if (!value) return new Date();
   if (value instanceof Date) return value;

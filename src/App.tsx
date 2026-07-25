@@ -33,6 +33,7 @@ import {
   displayProductQuantity,
   donationPrediction,
   formatDuration,
+  formatDurationInput,
   formatMoney,
   formatQuantity,
   mergeActivity,
@@ -591,7 +592,13 @@ function SosTab({ entries, member, deviceName, today, notify }: {
         </label>
         <label>
           Reported average
-          <input inputMode="numeric" placeholder="4:18" value={average} onChange={(event) => setAverage(event.target.value)} required />
+          <input
+            inputMode="numeric"
+            placeholder="4:18"
+            value={average}
+            onChange={(event) => setAverage(formatDurationInput(event.target.value))}
+            required
+          />
         </label>
         <button className="primary-button" disabled={busy}><Save aria-hidden="true" /> {busy ? 'Saving…' : 'Save hour'}</button>
         {error && <p className="form-error full-row" role="alert">{error}</p>}

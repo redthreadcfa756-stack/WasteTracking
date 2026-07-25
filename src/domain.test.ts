@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS } from './defaults';
-import { detectDaypart, distributeDollarTarget, donationPrediction, mergeActivity, parseDuration } from './domain';
+import { detectDaypart, distributeDollarTarget, donationPrediction, formatDurationInput, mergeActivity, parseDuration } from './domain';
 import type { WasteEvent } from './types';
 
 const event = (overrides: Partial<WasteEvent>): WasteEvent => ({
@@ -42,6 +42,13 @@ describe('domain rules', () => {
   it('parses SOS minute-second values', () => {
     expect(parseDuration('4:18')).toBe(258);
     expect(parseDuration('4:90')).toBeNull();
+  });
+
+  it('formats typed SOS digits as minutes and seconds', () => {
+    expect(formatDurationInput('4')).toBe('0:04');
+    expect(formatDurationInput('45')).toBe('0:45');
+    expect(formatDurationInput('123')).toBe('1:23');
+    expect(formatDurationInput('4:18')).toBe('4:18');
   });
 
   it('distributes a whole daypart target to the same dollar total', () => {
