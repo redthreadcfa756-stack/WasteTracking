@@ -36,8 +36,6 @@ import { DEFAULT_SETTINGS } from './defaults';
 import {
   daypartWaste,
   dayKey,
-  buildDonationCsv,
-  buildWasteCsv,
   buildWasteTrend,
   detectDaypart,
   displayProductQuantity,
@@ -52,6 +50,7 @@ import {
   targetDollarForProduct,
   type WasteExportGrouping,
 } from './domain';
+import { createDonationWorkbook, createWasteTrendWorkbook } from './exportWorkbook';
 import { firebaseConfigured } from './firebase';
 import { useAuthUser, useDeviceName, useMember, useNow, useOnlineStatus, useStoreData } from './hooks';
 import type {
@@ -942,14 +941,24 @@ function AdminTab({ settings, member, deviceName, notify }: {
         notify(`No waste data was found from ${exportStartDate} through ${exportEndDate}.`);
         return;
       }
-      const csv = buildWasteCsv(events, draft, exportGrouping, exportStartDate, exportEndDate, exportDays);
-      const url = URL.createObjectURL(new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' }));
+      const trend = buildWasteTrend(events, draft, exportGrouping);
+      const workbook = await createWasteTrendWorkbook({
+        trend,
+        settings: draft,
+        grouping: exportGrouping,
+        startDayKey: exportStartDate,
+        endDayKey: exportEndDate,
+        source: exportSource,
+      });
+      const url = URL.createObjectURL(new Blob([workbook], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      }));
       const link = document.createElement('a');
       link.href = url;
       const sourcePrefix = exportSource === 'demo' ? 'demo-' : '';
       link.download = exportDays === 1
-        ? `${sourcePrefix}waste-${exportEndDate}-by-${exportGrouping}.csv`
-        : `${sourcePrefix}waste-${exportDays}-days-ending-${exportEndDate}-by-${exportGrouping}.csv`;
+        ? `${sourcePrefix}waste-${exportEndDate}-by-${exportGrouping}.xlsx`
+        : `${sourcePrefix}waste-${exportDays}-days-ending-${exportEndDate}-by-${exportGrouping}.xlsx`;
       link.style.display = 'none';
       document.body.appendChild(link);
       link.click();
@@ -997,14 +1006,22 @@ function AdminTab({ settings, member, deviceName, notify }: {
         notify(`No submitted donation data was found from ${exportStartDate} through ${exportEndDate}.`);
         return;
       }
-      const csv = buildDonationCsv(records, draft, exportStartDate, exportEndDate, exportDays);
-      const url = URL.createObjectURL(new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' }));
+      const workbook = await createDonationWorkbook({
+        records,
+        settings: draft,
+        startDayKey: exportStartDate,
+        endDayKey: exportEndDate,
+        source: exportSource,
+      });
+      const url = URL.createObjectURL(new Blob([workbook], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      }));
       const link = document.createElement('a');
       link.href = url;
       const sourcePrefix = exportSource === 'demo' ? 'demo-' : '';
       link.download = exportDays === 1
-        ? `${sourcePrefix}donations-${exportEndDate}.csv`
-        : `${sourcePrefix}donations-${exportDays}-days-ending-${exportEndDate}.csv`;
+        ? `${sourcePrefix}donations-${exportEndDate}.xlsx`
+        : `${sourcePrefix}donations-${exportDays}-days-ending-${exportEndDate}.xlsx`;
       link.style.display = 'none';
       document.body.appendChild(link);
       link.click();
@@ -1164,13 +1181,13 @@ function AdminTab({ settings, member, deviceName, notify }: {
           </select>
         </label>
         <button className="primary-button" onClick={exportWaste} disabled={exporting || !exportStartDate || !exportEndDate}>
-          <Download aria-hidden="true" /> {exporting ? 'Preparing…' : 'Download waste CSV'}
+          <Download aria-hidden="true" /> {exporting ? 'Preparing…' : 'Download waste workbook'}
         </button>
         <button className="secondary-button" onClick={previewWasteTrend} disabled={previewingTrend || !exportStartDate || !exportEndDate}>
           {previewingTrend ? 'Loading trend…' : 'Preview waste trend'}
         </button>
         <button className="secondary-button" onClick={exportDonations} disabled={exportingDonations || !exportStartDate || !exportEndDate}>
-          <Download aria-hidden="true" /> {exportingDonations ? 'Preparing…' : 'Download donations CSV'}
+          <Download aria-hidden="true" /> {exportingDonations ? 'Preparing…' : 'Download donations workbook'}
         </button>
         {trendPreview.length > 0 && (
           <div className="trend-preview">

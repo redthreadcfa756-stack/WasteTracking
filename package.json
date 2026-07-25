@@ -12,6 +12,7 @@
     "seed": "node scripts/seed.mjs"
   },
   "dependencies": {
+    "exceljs": "^4.4.0",
     "firebase": "^12.16.0",
     "lucide-react": "^0.468.0",
     "react": "^19.2.0",
