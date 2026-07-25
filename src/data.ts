@@ -13,6 +13,7 @@ import {
   deleteDoc,
   doc,
   getDoc,
+  getDocs,
   onSnapshot,
   orderBy,
   query,
@@ -121,6 +122,16 @@ export async function createWasteEvent(event: Omit<WasteEvent, 'id' | 'eventAt'>
     eventAt: serverTimestamp(),
   });
   return eventDoc.id;
+}
+
+export async function loadWasteForDateRange(storeId: string, startDayKey: string, endDayKey: string): Promise<WasteEvent[]> {
+  const services = requireFirebase();
+  const snapshot = await getDocs(query(
+    collection(services.db, 'stores', storeId, 'wasteEvents'),
+    where('dayKey', '>=', startDayKey),
+    where('dayKey', '<=', endDayKey),
+  ));
+  return snapshot.docs.map((eventDoc) => ({ id: eventDoc.id, ...eventDoc.data() } as WasteEvent));
 }
 
 export async function removeWasteEvents(storeId: string, eventIds: string[]): Promise<void> {

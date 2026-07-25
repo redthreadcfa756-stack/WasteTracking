@@ -5,6 +5,7 @@ import {
   Clock3,
   Cloud,
   CloudOff,
+  Download,
   Gift,
   RotateCcw,
   Save,
@@ -18,6 +19,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } 
 import type { User } from 'firebase/auth';
 import {
   createWasteEvent,
+  loadWasteForDateRange,
   login,
   logout,
   removeWasteEvents,
@@ -29,6 +31,7 @@ import { DEFAULT_SETTINGS } from './defaults';
 import {
   daypartWaste,
   dayKey,
+  buildWasteCsv,
   detectDaypart,
   displayProductQuantity,
   donationPrediction,
@@ -40,6 +43,7 @@ import {
   parseDuration,
   productWaste,
   targetDollarForProduct,
+  type WasteExportGrouping,
 } from './domain';
 import { firebaseConfigured } from './firebase';
 import { useAuthUser, useDeviceName, useMember, useNow, useOnlineStatus, useStoreData } from './hooks';
@@ -808,6 +812,10 @@ function AdminTab({ settings, storeId, deviceName, notify }: {
   const [selectedDaypart, setSelectedDaypart] = useState<DaypartId>('breakfast');
   const [saving, setSaving] = useState(false);
   const [device, setDevice] = useState(deviceName);
+  const [exportDate, setExportDate] = useState(dayKey());
+  const [exportDays, setExportDays] = useState<1 | 30 | 60 | 90>(1);
+  const [exportGrouping, setExportGrouping] = useState<WasteExportGrouping>('hour');
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => setDraft(structuredClone(settings)), [settings]);
 
@@ -863,6 +871,38 @@ function AdminTab({ settings, storeId, deviceName, notify }: {
     }
   };
 
+  const exportWaste = async () => {
+    setExporting(true);
+    try {
+      const endDate = new Date(`${exportDate}T12:00:00`);
+      const startDate = new Date(endDate);
+      startDate.setDate(startDate.getDate() - (exportDays - 1));
+      const startDay = dayKey(startDate);
+      const events = await loadWasteForDateRange(storeId, startDay, exportDate);
+      if (events.length === 0) {
+        notify(`No waste data was found from ${startDay} through ${exportDate}.`);
+        return;
+      }
+      const csv = buildWasteCsv(events, draft, exportGrouping, startDay, exportDate, exportDays);
+      const url = URL.createObjectURL(new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = exportDays === 1
+        ? `waste-${exportDate}-by-${exportGrouping}.csv`
+        : `waste-${exportDays}-days-ending-${exportDate}-by-${exportGrouping}.csv`;
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+      notify(`${exportDays}-day waste export downloaded.`);
+    } catch (caught) {
+      notify(errorMessage(caught));
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <section className="panel-stack">
       <div className="section-heading">
@@ -899,6 +939,36 @@ function AdminTab({ settings, storeId, deviceName, notify }: {
             </tr>
           </tfoot>
         </table>
+      </div>
+      <div className="export-panel">
+        <div>
+          <p className="eyebrow">CSV export</p>
+          <h3>Export waste data</h3>
+          <p>Downloads net waste from all devices. Multi-day averages use only days logged for each row.</p>
+        </div>
+        <label>
+          Ending date
+          <input type="date" value={exportDate} onChange={(event) => setExportDate(event.target.value)} />
+        </label>
+        <label>
+          Period
+          <select value={exportDays} onChange={(event) => setExportDays(Number(event.target.value) as 1 | 30 | 60 | 90)}>
+            <option value={1}>Selected day</option>
+            <option value={30}>Current 30 days</option>
+            <option value={60}>Current 60 days</option>
+            <option value={90}>Current 90 days</option>
+          </select>
+        </label>
+        <label>
+          Aggregate by
+          <select value={exportGrouping} onChange={(event) => setExportGrouping(event.target.value as WasteExportGrouping)}>
+            <option value="hour">Hour</option>
+            <option value="daypart">Daypart</option>
+          </select>
+        </label>
+        <button className="primary-button" onClick={exportWaste} disabled={exporting || !exportDate}>
+          <Download aria-hidden="true" /> {exporting ? 'Preparing…' : 'Download CSV'}
+        </button>
       </div>
       <p className="footnote">Over-target alerts are muted for {draft.warningCooldownSeconds} seconds after dismissal. Donation predictions use the saved average weights.</p>
     </section>

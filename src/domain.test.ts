@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS } from './defaults';
-import { detectDaypart, distributeDollarTarget, donationPrediction, formatDurationInput, mergeActivity, parseDuration } from './domain';
+import { buildWasteCsv, detectDaypart, distributeDollarTarget, donationPrediction, formatDurationInput, mergeActivity, parseDuration } from './domain';
 import type { WasteEvent } from './types';
 
 const event = (overrides: Partial<WasteEvent>): WasteEvent => ({
@@ -49,6 +49,22 @@ describe('domain rules', () => {
     expect(formatDurationInput('45')).toBe('0:45');
     expect(formatDurationInput('123')).toBe('1:23');
     expect(formatDurationInput('4:18')).toBe('4:18');
+  });
+
+  it('exports net waste grouped by daypart', () => {
+    const csv = buildWasteCsv([
+      event({ id: 'a', productId: 'filets', equivalentUnits: 2, unitCostSnapshot: 2, daypartId: 'lunch' }),
+      event({ id: 'b', productId: 'filets', equivalentUnits: -1, unitCostSnapshot: 2, daypartId: 'lunch' }),
+    ], DEFAULT_SETTINGS, 'daypart', '2026-07-23');
+    expect(csv).toContain('2026-07-23,2026-07-23,Lunch,Filets,1,1,each,2.00,2.00,1,1,2');
+  });
+
+  it('calculates daily averages for a waste export range', () => {
+    const csv = buildWasteCsv([
+      event({ id: 'a', equivalentUnits: 20, unitCostSnapshot: 2, dayKey: '2026-07-01' }),
+      event({ id: 'b', equivalentUnits: 10, unitCostSnapshot: 2, dayKey: '2026-07-02' }),
+    ], DEFAULT_SETTINGS, 'hour', '2026-07-01', '2026-07-30', 30);
+    expect(csv).toContain(',Filets,30,15,each,60.00,30.00,2,30,2');
   });
 
   it('distributes a whole daypart target to the same dollar total', () => {

@@ -183,3 +183,94 @@ export function distributeDollarTarget(
     return [product.id, costPerTargetUnit > 0 ? allocatedDollars / costPerTargetUnit : 0];
   }));
 }
+
+export type WasteExportGrouping = 'hour' | 'daypart';
+
+export function buildWasteCsv(
+  events: WasteEvent[],
+  settings: AppSettings,
+  grouping: WasteExportGrouping,
+  startDayKey: string,
+  endDayKey = startDayKey,
+  daysInRange = 1,
+): string {
+  const products = new Map(settings.products.map((product) => [product.id, product]));
+  const dayparts = new Map(settings.dayparts.map((part, index) => [part.id, { label: part.label, order: index }]));
+  const rows = new Map<string, {
+    bucket: string;
+    bucketOrder: number;
+    productName: string;
+    quantity: number;
+    unit: 'each' | 'cups';
+    cost: number;
+    entries: number;
+    activeDays: Set<string>;
+  }>();
+
+  events.forEach((event) => {
+    const product = products.get(event.productId);
+    const date = eventDate(event.eventAt);
+    const hour = date.getHours();
+    const daypart = dayparts.get(event.daypartId);
+    const bucket = grouping === 'hour'
+      ? `${String(hour).padStart(2, '0')}:00-${String(hour).padStart(2, '0')}:59`
+      : daypart?.label || event.daypartId;
+    const bucketOrder = grouping === 'hour' ? hour : daypart?.order ?? 99;
+    const key = `${bucketOrder}|${event.productId}`;
+    const divisor = product?.trackingUnit === 'cup' ? (product.unitsPerCup || 14) : 1;
+    const current = rows.get(key) || {
+      bucket,
+      bucketOrder,
+      productName: product?.name || event.productName,
+      quantity: 0,
+      unit: product?.trackingUnit === 'cup' ? 'cups' : 'each',
+      cost: 0,
+      entries: 0,
+      activeDays: new Set<string>(),
+    };
+    current.quantity += event.equivalentUnits / divisor;
+    current.cost += event.equivalentUnits * event.unitCostSnapshot;
+    current.entries += 1;
+    current.activeDays.add(event.dayKey);
+    rows.set(key, current);
+  });
+
+  const escape = (value: string | number) => {
+    const text = String(value);
+    return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  };
+  const lines = [[
+    'Range start',
+    'Range end',
+    grouping === 'hour' ? 'Hour' : 'Daypart',
+    'Product',
+    'Total net quantity',
+    'Average quantity per logged day',
+    'Unit',
+    'Total waste dollars',
+    'Average waste dollars per logged day',
+    'Days with entries',
+    'Days in range',
+    'Entries',
+  ]];
+  [...rows.values()]
+    .sort((a, b) => a.bucketOrder - b.bucketOrder || a.productName.localeCompare(b.productName))
+    .forEach((row) => {
+      const loggedDays = Math.max(1, row.activeDays.size);
+      lines.push([
+        startDayKey,
+        endDayKey,
+        row.bucket,
+        row.productName,
+        formatQuantity(row.quantity),
+        formatQuantity(row.quantity / loggedDays),
+        row.unit,
+        row.cost.toFixed(2),
+        (row.cost / loggedDays).toFixed(2),
+        String(row.activeDays.size),
+        String(daysInRange),
+        String(row.entries),
+      ]);
+    });
+  return lines.map((line) => line.map(escape).join(',')).join('\r\n');
+}

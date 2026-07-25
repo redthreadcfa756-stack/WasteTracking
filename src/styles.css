@@ -281,6 +281,17 @@ code { font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.9em; }
 .table-input { min-width: 92px; min-height: 38px; padding: 0.45rem 0.55rem; border-radius: 9px; }
 .table-input:disabled { opacity: 1; border-color: transparent; background: transparent; }
 .calculated-value { display: inline-flex; min-height: 38px; align-items: center; font-weight: 750; }
+.export-panel {
+  display: grid;
+  gap: 0.85rem;
+  align-items: end;
+  padding: 1rem;
+  border-top: 5px solid var(--red);
+  background: #fff;
+}
+.export-panel h3,
+.export-panel p { margin: 0; }
+.export-panel > div > p:last-child { margin-top: 0.35rem; color: var(--muted); font-size: 0.82rem; }
 .cell-detail { display: block; margin-top: 0.2rem; color: var(--muted); font-size: 0.72rem; }
 
 .donation-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; color: var(--muted); font-size: 0.85rem; }
@@ -422,6 +433,7 @@ select {
   min-height: 48px;
   border: 1px solid #b8cbd6;
   background: #fff;
+  font-size: 16px;
 }
 
 input:focus,
