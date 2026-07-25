@@ -71,7 +71,8 @@ export interface SosEntry {
   id: string;
   storeId: string;
   dayKey: string;
-  hourStart: number;
+  daypartId?: DaypartId;
+  hourStart?: number;
   averageSeconds: number;
   loggedAt: Timestamp | Date | null;
   createdBy: string;

@@ -149,7 +149,6 @@ export function subscribeSosForDay(
   const sosQuery = query(
     collection(services.db, 'stores', storeId, 'sosEntries'),
     where('dayKey', '==', selectedDayKey),
-    orderBy('hourStart', 'desc'),
   );
   return onSnapshot(sosQuery, (snapshot) => {
     callback(snapshot.docs.map((entryDoc) => ({ id: entryDoc.id, ...entryDoc.data() } as SosEntry)));
@@ -158,7 +157,9 @@ export function subscribeSosForDay(
 
 export async function saveSosEntry(entry: Omit<SosEntry, 'id' | 'loggedAt'>): Promise<void> {
   const services = requireFirebase();
-  const entryId = `${entry.dayKey}_${String(entry.hourStart).padStart(2, '0')}`;
+  const entryId = entry.daypartId
+    ? `${entry.dayKey}_${entry.daypartId}`
+    : `${entry.dayKey}_${String(entry.hourStart).padStart(2, '0')}`;
   await setDoc(doc(services.db, 'stores', entry.storeId, 'sosEntries', entryId), {
     ...entry,
     loggedAt: serverTimestamp(),

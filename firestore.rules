@@ -36,14 +36,24 @@ service cloud.firestore {
 
     function validSosEntry(storeId) {
       return request.resource.data.keys().hasOnly([
-          'storeId', 'dayKey', 'hourStart', 'averageSeconds', 'loggedAt',
+          'storeId', 'dayKey', 'daypartId', 'hourStart', 'averageSeconds', 'loggedAt',
           'createdBy', 'createdByName', 'deviceName'
         ])
         && request.resource.data.storeId == storeId
         && request.resource.data.createdBy == request.auth.uid
-        && request.resource.data.hourStart is int
-        && request.resource.data.hourStart >= 0
-        && request.resource.data.hourStart <= 23
+        && (
+          (
+            request.resource.data.keys().hasAll(['daypartId'])
+            && request.resource.data.daypartId in ['breakfast', 'lunch', 'afternoon', 'early-dinner', 'late-dinner']
+          )
+          ||
+          (
+            request.resource.data.keys().hasAll(['hourStart'])
+            && request.resource.data.hourStart is int
+            && request.resource.data.hourStart >= 0
+            && request.resource.data.hourStart <= 23
+          )
+        )
         && request.resource.data.averageSeconds is number
         && request.resource.data.averageSeconds >= 0
         && request.resource.data.averageSeconds <= 3600

@@ -249,7 +249,15 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
           />
         )}
         {activeTab === 'sos' && (
-          <SosTab entries={storeData.sosEntries} member={member} deviceName={deviceName} today={storeData.today} notify={notify} />
+          <SosTab
+            settings={settings}
+            entries={storeData.sosEntries}
+            member={member}
+            deviceName={deviceName}
+            today={storeData.today}
+            initialDaypartId={targetDaypartId}
+            notify={notify}
+          />
         )}
         {activeTab === 'donations' && (
           <DonationsTab
@@ -534,24 +542,32 @@ function WasteCard({ product, totalUnits, totalCost, busy, onAdd, onSubtract }: 
   );
 }
 
-function SosTab({ entries, member, deviceName, today, notify }: {
+function SosTab({ settings, entries, member, deviceName, today, initialDaypartId, notify }: {
+  settings: AppSettings;
   entries: SosEntry[];
   member: MemberProfile;
   deviceName: string;
   today: string;
+  initialDaypartId: DaypartId;
   notify: (message: string) => void;
 }) {
-  const currentHour = Math.min(21, Math.max(6, new Date().getHours() - 1));
-  const [hour, setHour] = useState(currentHour);
+  const [selectedDaypart, setSelectedDaypart] = useState<DaypartId>(initialDaypartId);
   const [average, setAverage] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const daypartEntries = entries.filter((entry) => entry.daypartId);
+  const averageEntries = daypartEntries.length ? daypartEntries : entries;
+  const sortedEntries = [...entries].sort((a, b) => {
+    const aIndex = a.daypartId ? settings.dayparts.findIndex((part) => part.id === a.daypartId) : 99;
+    const bIndex = b.daypartId ? settings.dayparts.findIndex((part) => part.id === b.daypartId) : 99;
+    return aIndex - bIndex || (a.hourStart ?? 99) - (b.hourStart ?? 99);
+  });
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     const seconds = parseDuration(average);
     if (seconds === null) {
-      setError('Enter the hourly average as minutes:seconds, such as 4:18.');
+      setError('Enter the daypart average as minutes:seconds, such as 4:18.');
       return;
     }
     setBusy(true);
@@ -560,14 +576,14 @@ function SosTab({ entries, member, deviceName, today, notify }: {
       await saveSosEntry({
         storeId: member.storeId,
         dayKey: today,
-        hourStart: hour,
+        daypartId: selectedDaypart,
         averageSeconds: seconds,
         createdBy: member.uid,
         createdByName: member.displayName,
         deviceName,
       });
       setAverage('');
-      notify('Hourly SOS average saved.');
+      notify('Daypart SOS average saved.');
     } catch (caught) {
       setError(errorMessage(caught));
     } finally {
@@ -575,22 +591,24 @@ function SosTab({ entries, member, deviceName, today, notify }: {
     }
   };
 
-  const todayAverage = entries.length ? entries.reduce((sum, entry) => sum + entry.averageSeconds, 0) / entries.length : 0;
+  const todayAverage = averageEntries.length
+    ? averageEntries.reduce((sum, entry) => sum + entry.averageSeconds, 0) / averageEntries.length
+    : 0;
   return (
     <section className="panel-stack">
       <div className="section-heading">
-        <div><p className="eyebrow">Manual hourly entry</p><h2>Speed of service</h2></div>
+        <div><p className="eyebrow">Manual daypart entry</p><h2>Speed of service</h2></div>
       </div>
       <div className="stat-grid two">
-        <Stat label="Hours logged" value={String(entries.length)} detail="One average per hour" />
-        <Stat label="Today’s average" value={entries.length ? formatDuration(todayAverage) : '—'} detail="Minutes:seconds" />
+        <Stat label="Dayparts logged" value={String(daypartEntries.length)} detail="One average per daypart" />
+        <Stat label="Today’s average" value={averageEntries.length ? formatDuration(todayAverage) : '—'} detail="Minutes:seconds" />
       </div>
       <form className="entry-form" onSubmit={submit}>
         <label>
-          Hour
-          <select value={hour} onChange={(event) => setHour(Number(event.target.value))}>
-            {Array.from({ length: 16 }, (_, index) => index + 6).map((value) => (
-              <option key={value} value={value}>{formatHourRange(value)}</option>
+          Daypart
+          <select value={selectedDaypart} onChange={(event) => setSelectedDaypart(event.target.value as DaypartId)}>
+            {settings.dayparts.map((part) => (
+              <option key={part.id} value={part.id}>{part.label}</option>
             ))}
           </select>
         </label>
@@ -604,16 +622,18 @@ function SosTab({ entries, member, deviceName, today, notify }: {
             required
           />
         </label>
-        <button className="primary-button" disabled={busy}><Save aria-hidden="true" /> {busy ? 'Saving…' : 'Save hour'}</button>
+        <button className="primary-button" disabled={busy}><Save aria-hidden="true" /> {busy ? 'Saving…' : 'Save daypart'}</button>
         {error && <p className="form-error full-row" role="alert">{error}</p>}
       </form>
       <div className="data-table-wrap">
         <table className="data-table">
-          <thead><tr><th>Hour</th><th>Average</th><th>Logged by</th><th>Device</th></tr></thead>
+          <thead><tr><th>Daypart</th><th>Average</th><th>Logged by</th><th>Device</th></tr></thead>
           <tbody>
-            {entries.map((entry) => (
+            {sortedEntries.map((entry) => (
               <tr key={entry.id}>
-                <td>{formatHourRange(entry.hourStart)}</td>
+                <td>{entry.daypartId
+                  ? settings.dayparts.find((part) => part.id === entry.daypartId)?.label || entry.daypartId
+                  : `Legacy · ${formatHourRange(entry.hourStart ?? 0)}`}</td>
                 <td><strong>{formatDuration(entry.averageSeconds)}</strong></td>
                 <td>{entry.createdByName}</td>
                 <td>{entry.deviceName}</td>
@@ -621,7 +641,7 @@ function SosTab({ entries, member, deviceName, today, notify }: {
             ))}
           </tbody>
         </table>
-        {entries.length === 0 && <EmptyState>No hourly SOS averages logged today.</EmptyState>}
+        {entries.length === 0 && <EmptyState>No daypart SOS averages logged today.</EmptyState>}
       </div>
     </section>
   );
@@ -812,7 +832,8 @@ function AdminTab({ settings, storeId, deviceName, notify }: {
   const [selectedDaypart, setSelectedDaypart] = useState<DaypartId>('breakfast');
   const [saving, setSaving] = useState(false);
   const [device, setDevice] = useState(deviceName);
-  const [exportDate, setExportDate] = useState(dayKey());
+  const [exportStartDate, setExportStartDate] = useState(dayKey());
+  const [exportEndDate, setExportEndDate] = useState(dayKey());
   const [exportDays, setExportDays] = useState<1 | 30 | 60 | 90>(1);
   const [exportGrouping, setExportGrouping] = useState<WasteExportGrouping>('hour');
   const [exporting, setExporting] = useState(false);
@@ -871,25 +892,33 @@ function AdminTab({ settings, storeId, deviceName, notify }: {
     }
   };
 
+  const updateExportDates = (days: 1 | 30 | 60 | 90, endingDate: string) => {
+    setExportDays(days);
+    setExportEndDate(endingDate);
+    if (!endingDate) {
+      setExportStartDate('');
+      return;
+    }
+    const startDate = new Date(`${endingDate}T12:00:00`);
+    startDate.setDate(startDate.getDate() - (days - 1));
+    setExportStartDate(dayKey(startDate));
+  };
+
   const exportWaste = async () => {
     setExporting(true);
     try {
-      const endDate = new Date(`${exportDate}T12:00:00`);
-      const startDate = new Date(endDate);
-      startDate.setDate(startDate.getDate() - (exportDays - 1));
-      const startDay = dayKey(startDate);
-      const events = await loadWasteForDateRange(storeId, startDay, exportDate);
+      const events = await loadWasteForDateRange(storeId, exportStartDate, exportEndDate);
       if (events.length === 0) {
-        notify(`No waste data was found from ${startDay} through ${exportDate}.`);
+        notify(`No waste data was found from ${exportStartDate} through ${exportEndDate}.`);
         return;
       }
-      const csv = buildWasteCsv(events, draft, exportGrouping, startDay, exportDate, exportDays);
+      const csv = buildWasteCsv(events, draft, exportGrouping, exportStartDate, exportEndDate, exportDays);
       const url = URL.createObjectURL(new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' }));
       const link = document.createElement('a');
       link.href = url;
       link.download = exportDays === 1
-        ? `waste-${exportDate}-by-${exportGrouping}.csv`
-        : `waste-${exportDays}-days-ending-${exportDate}-by-${exportGrouping}.csv`;
+        ? `waste-${exportEndDate}-by-${exportGrouping}.csv`
+        : `waste-${exportDays}-days-ending-${exportEndDate}-by-${exportGrouping}.csv`;
       link.style.display = 'none';
       document.body.appendChild(link);
       link.click();
@@ -914,18 +943,44 @@ function AdminTab({ settings, storeId, deviceName, notify }: {
         <label>Whole daypart target<input type="number" value={calculatedDaypartTarget.toFixed(2)} readOnly /></label>
         <label>This device name<input value={device} onChange={(event) => setDevice(event.target.value)} /></label>
       </div>
+      <div className="section-heading activity-heading">
+        <div>
+          <p className="eyebrow">Shared {daypart.menu} menu values</p>
+          <h3>Product costs and weights</h3>
+        </div>
+      </div>
       <div className="data-table-wrap">
         <table className="data-table admin-table">
-          <thead><tr><th>Product</th><th>Unit cost</th><th>Avg lb/unit</th><th>Target quantity</th><th>Target dollars</th></tr></thead>
+          <thead><tr><th>Product</th><th>Unit cost</th><th>Avg lb/unit</th></tr></thead>
+          <tbody>
+            {products.map((product) => {
+              return (
+                <tr key={product.id}>
+                  <td><strong>{product.name}</strong><span className="cell-detail">Shared across every {daypart.menu} daypart</span></td>
+                  <td><input className="table-input" type="number" min="0.01" step="0.01" value={product.unitCost} onChange={(event) => updateProduct(product.id, { unitCost: Number(event.target.value) || 0 })} /></td>
+                  <td><input className="table-input" type="number" min="0.001" step="0.01" value={product.averageWeightLb} onChange={(event) => updateProduct(product.id, { averageWeightLb: Number(event.target.value) || 0 })} /></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div className="section-heading activity-heading">
+        <div>
+          <p className="eyebrow">{daypart.label}</p>
+          <h3>Daypart targets</h3>
+        </div>
+      </div>
+      <div className="data-table-wrap">
+        <table className="data-table admin-table">
+          <thead><tr><th>Product</th><th>Target quantity</th><th>Target dollars</th></tr></thead>
           <tbody>
             {products.map((product) => {
               const quantity = daypart.productTargetQuantities[product.id] || 0;
               const targetDollars = targetDollarForProduct(product, quantity);
               return (
                 <tr key={product.id}>
-                  <td><strong>{product.name}</strong><span className="cell-detail">{product.trackingUnit === 'cup' ? 'Target quantity in cups' : 'Target quantity in each'}</span></td>
-                  <td><input className="table-input" type="number" min="0.01" step="0.01" value={product.unitCost} onChange={(event) => updateProduct(product.id, { unitCost: Number(event.target.value) || 0 })} /></td>
-                  <td><input className="table-input" type="number" min="0.001" step="0.01" value={product.averageWeightLb} onChange={(event) => updateProduct(product.id, { averageWeightLb: Number(event.target.value) || 0 })} /></td>
+                  <td><strong>{product.name}</strong><span className="cell-detail">{product.trackingUnit === 'cup' ? 'Quantity in cups' : 'Quantity in each'}</span></td>
                   <td><input className="table-input" type="number" min="0" step="0.01" value={formatQuantity(quantity)} onChange={(event) => updateQuantity(product.id, Number(event.target.value) || 0)} /></td>
                   <td><output className="calculated-value">{formatMoney(targetDollars)}</output></td>
                 </tr>
@@ -934,7 +989,7 @@ function AdminTab({ settings, storeId, deviceName, notify }: {
           </tbody>
           <tfoot>
             <tr>
-              <td colSpan={4}><strong>Whole daypart target</strong></td>
+              <td colSpan={2}><strong>Whole daypart target</strong></td>
               <td><strong>{formatMoney(calculatedDaypartTarget)}</strong></td>
             </tr>
           </tfoot>
@@ -947,17 +1002,21 @@ function AdminTab({ settings, storeId, deviceName, notify }: {
           <p>Downloads net waste from all devices. Multi-day averages use only days logged for each row.</p>
         </div>
         <label>
-          Ending date
-          <input type="date" value={exportDate} onChange={(event) => setExportDate(event.target.value)} />
+          Starting date
+          <input type="date" value={exportStartDate} readOnly />
         </label>
         <label>
           Period
-          <select value={exportDays} onChange={(event) => setExportDays(Number(event.target.value) as 1 | 30 | 60 | 90)}>
+          <select value={exportDays} onChange={(event) => updateExportDates(Number(event.target.value) as 1 | 30 | 60 | 90, exportEndDate)}>
             <option value={1}>Selected day</option>
             <option value={30}>Current 30 days</option>
             <option value={60}>Current 60 days</option>
             <option value={90}>Current 90 days</option>
           </select>
+        </label>
+        <label>
+          Ending date
+          <input type="date" value={exportEndDate} onChange={(event) => updateExportDates(exportDays, event.target.value)} />
         </label>
         <label>
           Aggregate by
@@ -966,7 +1025,7 @@ function AdminTab({ settings, storeId, deviceName, notify }: {
             <option value="daypart">Daypart</option>
           </select>
         </label>
-        <button className="primary-button" onClick={exportWaste} disabled={exporting || !exportDate}>
+        <button className="primary-button" onClick={exportWaste} disabled={exporting || !exportStartDate || !exportEndDate}>
           <Download aria-hidden="true" /> {exporting ? 'Preparing…' : 'Download CSV'}
         </button>
       </div>
