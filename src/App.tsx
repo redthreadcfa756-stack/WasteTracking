@@ -20,13 +20,17 @@ import type { User } from 'firebase/auth';
 import {
   createWasteEvent,
   loadDonationRecordsForDateRange,
+  loadDemoDonationRecordsForDateRange,
+  loadDemoWasteForDateRange,
   loadWasteForDateRange,
   login,
   logout,
   removeWasteEvents,
+  removeExportDemoData,
   saveDonationRecord,
   saveSettings,
   saveSosEntry,
+  seedExportDemoData,
 } from './data';
 import { DEFAULT_SETTINGS } from './defaults';
 import {
@@ -274,7 +278,7 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
           />
         )}
         {activeTab === 'admin' && (
-          <AdminTab settings={settings} storeId={member.storeId} deviceName={deviceName} notify={notify} />
+          <AdminTab settings={settings} member={member} deviceName={deviceName} notify={notify} />
         )}
       </main>
 
@@ -825,12 +829,13 @@ function DonationSubmit({ existing, onClose, onSubmit }: {
   );
 }
 
-function AdminTab({ settings, storeId, deviceName, notify }: {
+function AdminTab({ settings, member, deviceName, notify }: {
   settings: AppSettings;
-  storeId: string;
+  member: MemberProfile;
   deviceName: string;
   notify: (message: string) => void;
 }) {
+  const storeId = member.storeId;
   const [draft, setDraft] = useState<AppSettings>(() => structuredClone(settings));
   const [selectedDaypart, setSelectedDaypart] = useState<DaypartId>('breakfast');
   const [saving, setSaving] = useState(false);
@@ -841,6 +846,8 @@ function AdminTab({ settings, storeId, deviceName, notify }: {
   const [exportGrouping, setExportGrouping] = useState<WasteExportGrouping>('hour');
   const [exporting, setExporting] = useState(false);
   const [exportingDonations, setExportingDonations] = useState(false);
+  const [exportSource, setExportSource] = useState<'live' | 'demo'>('live');
+  const [changingDemoData, setChangingDemoData] = useState(false);
 
   useEffect(() => setDraft(structuredClone(settings)), [settings]);
 
@@ -924,7 +931,9 @@ function AdminTab({ settings, storeId, deviceName, notify }: {
         notify('Choose a starting date that is on or before the ending date.');
         return;
       }
-      const events = await loadWasteForDateRange(storeId, exportStartDate, exportEndDate);
+      const events = exportSource === 'demo'
+        ? await loadDemoWasteForDateRange(storeId, exportStartDate, exportEndDate)
+        : await loadWasteForDateRange(storeId, exportStartDate, exportEndDate);
       if (events.length === 0) {
         notify(`No waste data was found from ${exportStartDate} through ${exportEndDate}.`);
         return;
@@ -933,9 +942,10 @@ function AdminTab({ settings, storeId, deviceName, notify }: {
       const url = URL.createObjectURL(new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' }));
       const link = document.createElement('a');
       link.href = url;
+      const sourcePrefix = exportSource === 'demo' ? 'demo-' : '';
       link.download = exportDays === 1
-        ? `waste-${exportEndDate}-by-${exportGrouping}.csv`
-        : `waste-${exportDays}-days-ending-${exportEndDate}-by-${exportGrouping}.csv`;
+        ? `${sourcePrefix}waste-${exportEndDate}-by-${exportGrouping}.csv`
+        : `${sourcePrefix}waste-${exportDays}-days-ending-${exportEndDate}-by-${exportGrouping}.csv`;
       link.style.display = 'none';
       document.body.appendChild(link);
       link.click();
@@ -957,7 +967,9 @@ function AdminTab({ settings, storeId, deviceName, notify }: {
         notify('Choose a starting date that is on or before the ending date.');
         return;
       }
-      const records = await loadDonationRecordsForDateRange(storeId, exportStartDate, exportEndDate);
+      const records = exportSource === 'demo'
+        ? await loadDemoDonationRecordsForDateRange(storeId, exportStartDate, exportEndDate)
+        : await loadDonationRecordsForDateRange(storeId, exportStartDate, exportEndDate);
       if (records.length === 0) {
         notify(`No submitted donation data was found from ${exportStartDate} through ${exportEndDate}.`);
         return;
@@ -966,9 +978,10 @@ function AdminTab({ settings, storeId, deviceName, notify }: {
       const url = URL.createObjectURL(new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' }));
       const link = document.createElement('a');
       link.href = url;
+      const sourcePrefix = exportSource === 'demo' ? 'demo-' : '';
       link.download = exportDays === 1
-        ? `donations-${exportEndDate}.csv`
-        : `donations-${exportDays}-days-ending-${exportEndDate}.csv`;
+        ? `${sourcePrefix}donations-${exportEndDate}.csv`
+        : `${sourcePrefix}donations-${exportDays}-days-ending-${exportEndDate}.csv`;
       link.style.display = 'none';
       document.body.appendChild(link);
       link.click();
@@ -979,6 +992,34 @@ function AdminTab({ settings, storeId, deviceName, notify }: {
       notify(errorMessage(caught));
     } finally {
       setExportingDonations(false);
+    }
+  };
+
+  const seedDemoData = async () => {
+    setChangingDemoData(true);
+    try {
+      await seedExportDemoData(storeId, draft, member.uid, member.displayName, device);
+      setExportSource('demo');
+      updateExportDates(30, dayKey());
+      notify('Demo export data seeded for the current 30 days.');
+    } catch (caught) {
+      notify(errorMessage(caught));
+    } finally {
+      setChangingDemoData(false);
+    }
+  };
+
+  const removeDemoData = async () => {
+    if (!window.confirm('Remove all demo export data? Live data will not be affected.')) return;
+    setChangingDemoData(true);
+    try {
+      await removeExportDemoData(storeId);
+      setExportSource('live');
+      notify('All isolated demo export data was removed.');
+    } catch (caught) {
+      notify(errorMessage(caught));
+    } finally {
+      setChangingDemoData(false);
     }
   };
 
@@ -1078,6 +1119,13 @@ function AdminTab({ settings, storeId, deviceName, notify }: {
           </select>
         </label>
         <label>
+          Data source
+          <select value={exportSource} onChange={(event) => setExportSource(event.target.value as 'live' | 'demo')}>
+            <option value="live">Live data</option>
+            <option value="demo">Demo data</option>
+          </select>
+        </label>
+        <label>
           Waste aggregate by
           <select value={exportGrouping} onChange={(event) => setExportGrouping(event.target.value as WasteExportGrouping)}>
             <option value="hour">Hour</option>
@@ -1090,6 +1138,18 @@ function AdminTab({ settings, storeId, deviceName, notify }: {
         <button className="secondary-button" onClick={exportDonations} disabled={exportingDonations || !exportStartDate || !exportEndDate}>
           <Download aria-hidden="true" /> {exportingDonations ? 'Preparing…' : 'Download donations CSV'}
         </button>
+        <div className="demo-data-controls">
+          <div>
+            <strong>Demo export data</strong>
+            <span>Stored separately from live operational records.</span>
+          </div>
+          <button className="secondary-button" onClick={seedDemoData} disabled={changingDemoData}>
+            {changingDemoData ? 'Working…' : 'Seed demo data'}
+          </button>
+          <button className="secondary-button danger-button" onClick={removeDemoData} disabled={changingDemoData}>
+            Remove demo data
+          </button>
+        </div>
       </div>
       <p className="footnote">Over-target alerts are muted for {draft.warningCooldownSeconds} seconds after dismissal. Donation predictions use the saved average weights.</p>
     </section>

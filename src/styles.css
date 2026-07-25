@@ -292,6 +292,24 @@ code { font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.9em; }
 .export-panel h3,
 .export-panel p { margin: 0; }
 .export-panel > div > p:last-child { margin-top: 0.35rem; color: var(--muted); font-size: 0.82rem; }
+.demo-data-controls {
+  display: grid;
+  gap: 0.65rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--line);
+}
+.demo-data-controls > div {
+  display: grid;
+  gap: 0.2rem;
+}
+.demo-data-controls span {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.danger-button {
+  border-color: var(--danger);
+  color: var(--danger);
+}
 .admin-dropdown {
   border-top: 5px solid var(--red);
   background: #fff;

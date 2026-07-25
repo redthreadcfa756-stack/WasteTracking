@@ -108,6 +108,14 @@ service cloud.firestore {
         allow create, update: if belongsToStore(storeId) && validDonationRecord(storeId);
         allow delete: if belongsToStore(storeId);
       }
+
+      match /exportDemoWaste/{eventId} {
+        allow read, create, update, delete: if belongsToStore(storeId);
+      }
+
+      match /exportDemoDonations/{recordId} {
+        allow read, create, update, delete: if belongsToStore(storeId);
+      }
     }
 
     match /{document=**} {
