@@ -79,6 +79,21 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    function validCooldownTimer(storeId) {
+      return request.resource.data.keys().hasOnly([
+          'storeId', 'panLabel', 'active', 'startedAt', 'expiresAt', 'lastWasteAt',
+          'joinedWasteCount', 'joinedProductIds', 'startedBy', 'startedByName'
+        ])
+        && request.resource.data.storeId == storeId
+        && request.resource.data.panLabel is string
+        && request.resource.data.active is bool
+        && request.resource.data.joinedWasteCount is int
+        && request.resource.data.joinedWasteCount >= 0
+        && request.resource.data.joinedProductIds is list
+        && request.resource.data.startedBy is string
+        && request.resource.data.startedByName is string;
+    }
+
     match /stores/{storeId} {
       allow read: if belongsToStore(storeId);
       allow write: if false;
@@ -107,6 +122,12 @@ service cloud.firestore {
         allow read: if belongsToStore(storeId);
         allow create, update: if belongsToStore(storeId) && validDonationRecord(storeId);
         allow delete: if belongsToStore(storeId);
+      }
+
+      match /cooldownTimers/{panId} {
+        allow read: if belongsToStore(storeId);
+        allow create, update: if belongsToStore(storeId) && validCooldownTimer(storeId);
+        allow delete: if false;
       }
 
       match /exportDemoWaste/{eventId} {

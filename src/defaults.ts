@@ -67,6 +67,7 @@ export const DEFAULT_DAYPARTS: DaypartConfig[] = [
 export const DEFAULT_SETTINGS: AppSettings = {
   version: 1,
   warningCooldownSeconds: 90,
+  cooldownTimersEnabled: false,
   products: DEFAULT_PRODUCTS,
   dayparts: DEFAULT_DAYPARTS,
   donationItems: DEFAULT_DONATION_ITEMS,

@@ -27,10 +27,13 @@ import {
   logout,
   removeWasteEvents,
   removeExportDemoData,
+  resetAllCooldownTimers,
+  resetCooldownTimer,
   saveDonationRecord,
   saveSettings,
   saveSosEntry,
   seedExportDemoData,
+  startOrJoinCooldownTimer,
 } from './data';
 import { DEFAULT_SETTINGS } from './defaults';
 import {
@@ -55,6 +58,8 @@ import { firebaseConfigured } from './firebase';
 import { useAuthUser, useDeviceName, useMember, useNow, useOnlineStatus, useStoreData } from './hooks';
 import type {
   AppSettings,
+  CooldownPanId,
+  CooldownTimer,
   DaypartId,
   DonationItemConfig,
   DonationRecord,
@@ -70,6 +75,16 @@ type MenuSelection = 'auto' | MenuId;
 type ExportPeriod = 1 | 30 | 60 | 90 | 'custom';
 const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || '00756';
 const WRITE_TIMEOUT_MS = 8_000;
+const COOLDOWN_PANS: Array<{
+  id: CooldownPanId;
+  label: string;
+  productIds: string[];
+}> = [
+  { id: 'pan-1', label: 'Top pan (Pan 1)', productIds: ['grilled-filets', 'grilled-nuggets'] },
+  { id: 'pan-2', label: 'Pan 2', productIds: ['nuggets', 'strips'] },
+  { id: 'pan-3', label: 'Pan 3', productIds: ['filets'] },
+  { id: 'pan-4', label: 'Bottom pan (Pan 4)', productIds: ['spicy'] },
+];
 
 function confirmWrite<T>(write: Promise<T>): Promise<T> {
   return Promise.race([
@@ -78,6 +93,45 @@ function confirmWrite<T>(write: Promise<T>): Promise<T> {
       window.setTimeout(() => reject(new Error('Sync is taking too long. Check Recent activity before trying again.')), WRITE_TIMEOUT_MS);
     }),
   ]);
+}
+
+function timestampMillis(value: CooldownTimer['expiresAt']): number {
+  if (!value) return 0;
+  if (value instanceof Date) return value.getTime();
+  return value.toMillis();
+}
+
+let cooldownAudioContext: AudioContext | null = null;
+
+function getCooldownAudioContext(): AudioContext | null {
+  if (cooldownAudioContext) return cooldownAudioContext;
+  const AudioContextClass = window.AudioContext
+    || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!AudioContextClass) return null;
+  cooldownAudioContext = new AudioContextClass();
+  return cooldownAudioContext;
+}
+
+function playCooldownAlarm() {
+  try {
+    const context = getCooldownAudioContext();
+    if (!context) return;
+    if (context.state === 'suspended') void context.resume();
+    [0, 0.32, 0.64].forEach((delay) => {
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      oscillator.frequency.value = 880;
+      gain.gain.setValueAtTime(0.0001, context.currentTime + delay);
+      gain.gain.exponentialRampToValueAtTime(0.35, context.currentTime + delay + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + delay + 0.24);
+      oscillator.connect(gain);
+      gain.connect(context.destination);
+      oscillator.start(context.currentTime + delay);
+      oscillator.stop(context.currentTime + delay + 0.25);
+    });
+  } catch {
+    // The synchronized popup still appears when a browser blocks automatic audio.
+  }
 }
 
 const TABS: Array<{ id: TabId; label: string; icon: typeof Trash2 }> = [
@@ -189,10 +243,47 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
   const [warning, setWarning] = useState<{ daypart: string; total: number; target: number } | null>(null);
   const [warningMutedUntil, setWarningMutedUntil] = useState(0);
   const [toast, setToast] = useState('');
+  const [timerNow, setTimerNow] = useState(Date.now());
+  const alertedTimers = useRef(new Set<string>());
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setTimerNow(Date.now()), 1_000);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    const primeAudio = () => {
+      const context = getCooldownAudioContext();
+      if (context?.state === 'suspended') void context.resume();
+    };
+    window.addEventListener('pointerdown', primeAudio, { once: true });
+    return () => window.removeEventListener('pointerdown', primeAudio);
+  }, []);
+
+  const expiredTimer = settings.cooldownTimersEnabled
+    ? storeData.cooldownTimers.find((timer) => timer.active && timestampMillis(timer.expiresAt) <= timerNow)
+    : undefined;
+
+  useEffect(() => {
+    if (!expiredTimer) return;
+    const key = `${expiredTimer.id}:${timestampMillis(expiredTimer.expiresAt)}`;
+    if (alertedTimers.current.has(key)) return;
+    alertedTimers.current.add(key);
+    playCooldownAlarm();
+  }, [expiredTimer]);
 
   const notify = (message: string) => {
     setToast(message);
     window.setTimeout(() => setToast(''), 2600);
+  };
+
+  const completeCooldownTimer = async (timer: CooldownTimer) => {
+    try {
+      await resetCooldownTimer(member.storeId, timer.id);
+      notify(`${timer.panLabel} reset and ready for the next waste entry.`);
+    } catch (caught) {
+      notify(errorMessage(caught));
+    }
   };
 
   const selectTab = (tab: TabId) => {
@@ -227,6 +318,28 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
           </span>
         </div>
       </header>
+
+      {settings.cooldownTimersEnabled && (
+        <section className="cooldown-strip" aria-label="Cooldown pan timers">
+          {COOLDOWN_PANS.map((pan) => {
+            const timer = storeData.cooldownTimers.find((candidate) => candidate.id === pan.id && candidate.active);
+            const remainingMs = timer ? Math.max(0, timestampMillis(timer.expiresAt) - timerNow) : 0;
+            const remainingSeconds = Math.ceil(remainingMs / 1_000);
+            const remainingPercent = timer ? Math.min(100, (remainingMs / (60 * 60 * 1000)) * 100) : 0;
+            return (
+              <div className={`cooldown-strip-item ${timer ? 'active' : ''}`} key={pan.id}>
+                <div>
+                  <span>{pan.label}</span>
+                  <strong>{timer ? formatDuration(remainingSeconds) : 'Ready'}</strong>
+                </div>
+                <div className="cooldown-progress" aria-hidden="true">
+                  <span style={{ width: `${remainingPercent}%` }} />
+                </div>
+              </div>
+            );
+          })}
+        </section>
+      )}
 
       {storeData.error && <div className="error-banner" role="alert">{storeData.error}</div>}
 
@@ -308,6 +421,18 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
           }}>Dismiss for {settings.warningCooldownSeconds} seconds</button>
         </Modal>
       )}
+      {expiredTimer && (
+        <Modal
+          title={`${expiredTimer.panLabel} cooldown complete`}
+          icon={<Timer />}
+          onClose={() => void completeCooldownTimer(expiredTimer)}
+        >
+          <p>Wrap the pan and place it in the walk-in cooler.</p>
+          <button className="primary-button" onClick={() => void completeCooldownTimer(expiredTimer)}>
+            <Check /> Pan wrapped and moved
+          </button>
+        </Modal>
+      )}
       {toast && <div className="toast" role="status">{toast}</div>}
     </div>
   );
@@ -368,6 +493,17 @@ function WasteTab({
         createdBy: member.uid,
         createdByName: member.displayName,
       }));
+      if (equivalentUnits > 0 && settings.cooldownTimersEnabled) {
+        const matchingPans = COOLDOWN_PANS.filter((pan) => pan.productIds.includes(product.id));
+        await confirmWrite(Promise.all(matchingPans.map((pan) => startOrJoinCooldownTimer({
+          storeId: member.storeId,
+          panId: pan.id,
+          panLabel: pan.label,
+          productId: product.id,
+          createdBy: member.uid,
+          createdByName: member.displayName,
+        }))));
+      }
       const projectedCost = activeWaste.cost + equivalentUnits * product.unitCost;
       if (projectedCost > daypart.totalDollarTarget && Date.now() >= warningMutedUntil) {
         showWarning({ daypart: daypart.label, total: projectedCost, target: daypart.totalDollarTarget });
@@ -488,7 +624,6 @@ function WasteTab({
           </div>
         </Modal>
       )}
-
     </section>
   );
 }
@@ -895,6 +1030,7 @@ function AdminTab({ settings, member, deviceName, notify }: {
     setSaving(true);
     try {
       await saveSettings(storeId, draft);
+      if (!draft.cooldownTimersEnabled) await resetAllCooldownTimers(storeId);
       localStorage.setItem('waste-sos-device-name', device.trim() || 'Web device');
       notify('Admin settings saved for every device.');
     } catch (caught) {
@@ -1051,6 +1187,17 @@ function AdminTab({ settings, member, deviceName, notify }: {
       </div>
       <div className="admin-strip">
         <label>This device name<input value={device} onChange={(event) => setDevice(event.target.value)} /></label>
+        <label className="toggle-row">
+          <input
+            type="checkbox"
+            checked={draft.cooldownTimersEnabled}
+            onChange={(event) => setDraft((current) => ({
+              ...current,
+              cooldownTimersEnabled: event.target.checked,
+            }))}
+          />
+          <span>Enable one-hour cooldown pan timers</span>
+        </label>
       </div>
       <details className="admin-dropdown">
         <summary>Donations · Product unit costs and weights</summary>

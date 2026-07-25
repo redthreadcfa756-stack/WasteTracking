@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { User } from 'firebase/auth';
-import { observeAuth, subscribeDonationRecord, subscribeSettings, subscribeSosForDay, subscribeWasteForDay } from './data';
+import { observeAuth, subscribeCooldownTimers, subscribeDonationRecord, subscribeSettings, subscribeSosForDay, subscribeWasteForDay } from './data';
 import { DEFAULT_DONATION_ITEMS } from './defaults';
 import { dayKey, previousDayKey } from './domain';
-import type { AppSettings, DonationRecord, MemberProfile, SosEntry, WasteEvent } from './types';
+import type { AppSettings, CooldownTimer, DonationRecord, MemberProfile, SosEntry, WasteEvent } from './types';
 
 export function useAuthUser() {
   const [user, setUser] = useState<User | null>(null);
@@ -82,6 +82,7 @@ export function useStoreData(storeId: string | undefined, now: Date) {
   const [previousWaste, setPreviousWaste] = useState<WasteEvent[]>([]);
   const [sosEntries, setSosEntries] = useState<SosEntry[]>([]);
   const [donationRecord, setDonationRecord] = useState<DonationRecord | null>(null);
+  const [cooldownTimers, setCooldownTimers] = useState<CooldownTimer[]>([]);
   const [error, setError] = useState('');
   const [ready, setReady] = useState(Boolean(storeId));
 
@@ -97,6 +98,7 @@ export function useStoreData(storeId: string | undefined, now: Date) {
       subscribeSettings(storeId, (value) => {
         setSettings(value ? {
           ...value,
+          cooldownTimersEnabled: value.cooldownTimersEnabled ?? false,
           products: value.products.map((product) => product.id === 'nuggets'
             ? { ...product, menus: ['breakfast', 'lunch'] }
             : product),
@@ -109,9 +111,10 @@ export function useStoreData(storeId: string | undefined, now: Date) {
       subscribeWasteForDay(storeId, previous, setPreviousWaste, handleError),
       subscribeSosForDay(storeId, today, setSosEntries, handleError),
       subscribeDonationRecord(storeId, today, setDonationRecord, handleError),
+      subscribeCooldownTimers(storeId, setCooldownTimers, handleError),
     ];
     return () => subscriptions.forEach((unsubscribe) => unsubscribe());
   }, [storeId, today, previous]);
 
-  return { settings, todayWaste, previousWaste, sosEntries, donationRecord, error, ready, today };
+  return { settings, todayWaste, previousWaste, sosEntries, donationRecord, cooldownTimers, error, ready, today };
 }

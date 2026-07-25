@@ -4,6 +4,7 @@ export type MenuId = 'breakfast' | 'lunch';
 export type DaypartId = 'breakfast' | 'lunch' | 'afternoon' | 'early-dinner' | 'late-dinner';
 export type DonationUnit = 'lb' | 'each';
 export type MemberRole = 'employee' | 'admin';
+export type CooldownPanId = 'pan-1' | 'pan-2' | 'pan-3' | 'pan-4';
 
 export interface ProductConfig {
   id: string;
@@ -37,9 +38,24 @@ export interface DonationItemConfig {
 export interface AppSettings {
   version: number;
   warningCooldownSeconds: number;
+  cooldownTimersEnabled: boolean;
   products: ProductConfig[];
   dayparts: DaypartConfig[];
   donationItems: DonationItemConfig[];
+}
+
+export interface CooldownTimer {
+  id: CooldownPanId;
+  storeId: string;
+  panLabel: string;
+  active: boolean;
+  startedAt: Timestamp | Date | null;
+  expiresAt: Timestamp | Date | null;
+  lastWasteAt: Timestamp | Date | null;
+  joinedWasteCount: number;
+  joinedProductIds: string[];
+  startedBy: string;
+  startedByName: string;
 }
 
 export interface MemberProfile {

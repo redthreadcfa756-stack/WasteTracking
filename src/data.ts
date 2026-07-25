@@ -17,15 +17,17 @@ import {
   onSnapshot,
   orderBy,
   query,
+  runTransaction,
   serverTimestamp,
   setDoc,
+  Timestamp,
   where,
   writeBatch,
   type FirestoreError,
   type Unsubscribe,
 } from 'firebase/firestore';
 import { auth, db } from './firebase';
-import type { AppSettings, DonationRecord, MemberProfile, SosEntry, WasteEvent } from './types';
+import type { AppSettings, CooldownPanId, CooldownTimer, DonationRecord, MemberProfile, SosEntry, WasteEvent } from './types';
 
 function requireFirebase() {
   if (!auth || !db) throw new Error('Firebase environment variables are missing.');
@@ -123,6 +125,85 @@ export async function createWasteEvent(event: Omit<WasteEvent, 'id' | 'eventAt'>
     eventAt: serverTimestamp(),
   });
   return eventDoc.id;
+}
+
+export function subscribeCooldownTimers(
+  storeId: string,
+  callback: (timers: CooldownTimer[]) => void,
+  onError: (error: FirestoreError) => void,
+): Unsubscribe {
+  const services = requireFirebase();
+  return onSnapshot(collection(services.db, 'stores', storeId, 'cooldownTimers'), (snapshot) => {
+    callback(snapshot.docs.map((timerDoc) => ({
+      id: timerDoc.id,
+      ...timerDoc.data(),
+    } as CooldownTimer)));
+  }, onError);
+}
+
+export async function startOrJoinCooldownTimer({
+  storeId,
+  panId,
+  panLabel,
+  productId,
+  createdBy,
+  createdByName,
+}: {
+  storeId: string;
+  panId: CooldownPanId;
+  panLabel: string;
+  productId: string;
+  createdBy: string;
+  createdByName: string;
+}): Promise<void> {
+  const services = requireFirebase();
+  const timerRef = doc(services.db, 'stores', storeId, 'cooldownTimers', panId);
+  await runTransaction(services.db, async (transaction) => {
+    const snapshot = await transaction.get(timerRef);
+    const existing = snapshot.exists() ? snapshot.data() as CooldownTimer : null;
+    const now = Timestamp.now();
+    if (existing?.active) {
+      transaction.update(timerRef, {
+        lastWasteAt: now,
+        joinedWasteCount: (existing.joinedWasteCount || 0) + 1,
+        joinedProductIds: [...new Set([...(existing.joinedProductIds || []), productId])],
+      });
+      return;
+    }
+    transaction.set(timerRef, {
+      storeId,
+      panLabel,
+      active: true,
+      startedAt: now,
+      expiresAt: Timestamp.fromMillis(now.toMillis() + 60 * 60 * 1000),
+      lastWasteAt: now,
+      joinedWasteCount: 1,
+      joinedProductIds: [productId],
+      startedBy: createdBy,
+      startedByName: createdByName,
+    });
+  });
+}
+
+export async function resetCooldownTimer(storeId: string, panId: CooldownPanId): Promise<void> {
+  const services = requireFirebase();
+  await setDoc(doc(services.db, 'stores', storeId, 'cooldownTimers', panId), {
+    storeId,
+    panLabel: panId,
+    active: false,
+    startedAt: null,
+    expiresAt: null,
+    lastWasteAt: serverTimestamp(),
+    joinedWasteCount: 0,
+    joinedProductIds: [],
+    startedBy: services.auth.currentUser?.uid || '',
+    startedByName: '',
+  }, { merge: true });
+}
+
+export async function resetAllCooldownTimers(storeId: string): Promise<void> {
+  await Promise.all((['pan-1', 'pan-2', 'pan-3', 'pan-4'] as CooldownPanId[])
+    .map((panId) => resetCooldownTimer(storeId, panId)));
 }
 
 export async function loadWasteForDateRange(storeId: string, startDayKey: string, endDayKey: string): Promise<WasteEvent[]> {
