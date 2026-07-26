@@ -562,7 +562,10 @@ function WasteTab({
   const menuEvents = displayedEvents.filter((event) => event.menu === effectiveMenu);
   const activeWaste = daypartWaste(displayedEvents, targetDaypartId);
   const merged = mergeActivity(menuEvents, settings.products);
-  const totalCost = menuEvents.reduce((sum, event) => sum + event.equivalentUnits * event.unitCostSnapshot, 0);
+  const targetVariance = activeWaste.cost - daypart.totalDollarTarget;
+  const varianceDetail = Math.abs(targetVariance) < 0.005
+    ? 'On target'
+    : `${formatMoney(Math.abs(targetVariance))} ${targetVariance > 0 ? 'over' : 'under'} target`;
 
   const adjustWaste = async (product: ProductConfig, equivalentUnits: number) => {
     const isCup = product.trackingUnit === 'cup' && Math.abs(equivalentUnits) === (product.unitsPerCup || 14);
@@ -692,10 +695,13 @@ function WasteTab({
         </label>
       </div>
 
-      <div className="stat-grid">
-        <Stat label={testMode ? 'Test waste' : 'Menu waste'} value={formatMoney(totalCost)} detail={testMode ? 'Not saved' : effectiveMenu === 'breakfast' ? 'Breakfast items' : 'Lunch items'} />
-        <Stat label={testMode ? `${daypart.label} test target` : `${daypart.label} target`} value={formatMoney(daypart.totalDollarTarget)} detail={`${formatMoney(activeWaste.cost)} ${testMode ? 'simulated' : 'used'}`} />
-        <Stat label="Target remaining" value={formatMoney(Math.max(0, daypart.totalDollarTarget - activeWaste.cost))} detail={testMode ? 'Local-only totals' : activeWaste.cost > daypart.totalDollarTarget ? 'Over target' : 'Live from all devices'} tone={!testMode && activeWaste.cost > daypart.totalDollarTarget ? 'danger' : undefined} />
+      <div className="stat-grid one">
+        <Stat
+          label={`${testMode ? 'Test · ' : ''}${daypart.label} waste / target`}
+          value={`${formatMoney(activeWaste.cost)} / ${formatMoney(daypart.totalDollarTarget)}`}
+          detail={`${varianceDetail}${testMode ? ' · Local only' : ''}`}
+          tone={targetVariance > 0 ? 'danger' : undefined}
+        />
       </div>
 
       <div className="waste-grid">
