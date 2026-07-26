@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_SETTINGS } from './defaults';
+import { DEFAULT_SETTINGS, PRODUCT_TONES } from './defaults';
 import { adjustCooldownProductQuantities, buildDonationCsv, buildWasteCsv, cooldownProductQuantity, detectDaypart, distributeDollarTarget, donationPrediction, formatDurationInput, mergeActivity, parseDuration } from './domain';
 import type { CooldownTimer, DonationItemConfig, DonationRecord, WasteEvent } from './types';
 
@@ -11,6 +11,19 @@ const event = (overrides: Partial<WasteEvent>): WasteEvent => ({
 });
 
 describe('domain rules', () => {
+  it('uses the requested protein color mapping', () => {
+    expect(PRODUCT_TONES).toMatchObject({
+      filets: 1,
+      nuggets: 2,
+      'grilled-nuggets': 3,
+      'grilled-filets': 4,
+      spicy: 5,
+      'breakfast-filets': 6,
+      'breakfast-spicy': 7,
+      strips: 8,
+    });
+  });
+
   it('uses the requested daypart boundaries', () => {
     expect(detectDaypart(DEFAULT_SETTINGS.dayparts, new Date(2026, 6, 23, 10, 29))).toBe('breakfast');
     expect(detectDaypart(DEFAULT_SETTINGS.dayparts, new Date(2026, 6, 23, 10, 30))).toBe('lunch');

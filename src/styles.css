@@ -309,22 +309,25 @@ code { font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.9em; }
 }
 .waste-card:active { transform: scale(0.985); }
 .waste-card-top { display: flex; align-items: center; gap: 0.65rem; font-weight: 750; line-height: 1.2; }
-.waste-circle { width: 38px; height: 38px; flex: 0 0 38px; display: grid; place-items: center; border-radius: 50%; color: #fff; font-size: 1.35rem; }
+.waste-circle { width: 38px; height: 38px; flex: 0 0 38px; display: grid; place-items: center; border-radius: 50%; color: var(--protein-contrast, #fff); background: var(--protein-color, var(--red)); font-size: 1.35rem; }
 .waste-total { margin-top: 0.35rem; font-size: 1.65rem; font-weight: 800; letter-spacing: -0.045em; }
 .waste-hint { color: var(--muted); font-size: 0.72rem; line-height: 1.25; }
 
-.tone-1 .waste-circle, .activity-dot.tone-1 { background: #a52239; }
-.tone-2 .waste-circle, .activity-dot.tone-2 { background: #d2592a; }
-.tone-3 .waste-circle, .activity-dot.tone-3 { background: #b88a1b; }
-.tone-4 .waste-circle, .activity-dot.tone-4 { background: #6856a8; }
-.tone-5 .waste-circle, .activity-dot.tone-5 { background: #2f7c66; }
-.tone-6 .waste-circle, .activity-dot.tone-6 { background: #34729a; }
+.tone-1 { --protein-color: #34729a; --protein-contrast: #fff; }
+.tone-2 { --protein-color: #d94f8a; --protein-contrast: #fff; }
+.tone-3 { --protein-color: #6b7280; --protein-contrast: #fff; }
+.tone-4 { --protein-color: #8a5a3b; --protein-contrast: #fff; }
+.tone-5 { --protein-color: #7653a6; --protein-contrast: #fff; }
+.tone-6 { --protein-color: #e0ad00; --protein-contrast: #111d23; }
+.tone-7 { --protein-color: #dd6b20; --protein-contrast: #fff; }
+.tone-8 { --protein-color: #2f7c52; --protein-contrast: #fff; }
+.tone-9 { --protein-color: #a52239; --protein-contrast: #fff; }
 
 .activity-list { display: grid; border-top: 1px solid var(--line); }
 .activity-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0.75rem; padding: 0.8rem 0.15rem; border-bottom: 1px solid var(--line); }
 .activity-row > div { display: grid; gap: 0.15rem; min-width: 0; }
 .activity-row span:not(.activity-dot) { color: var(--muted); font-size: 0.78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.activity-dot { width: 11px; height: 11px; border-radius: 50%; }
+.activity-dot { width: 11px; height: 11px; border-radius: 50%; background: var(--protein-color, var(--red)); }
 
 .primary-button, .secondary-button {
   display: inline-flex;
@@ -864,7 +867,7 @@ label,
   min-height: 172px;
   padding: 1rem;
   border: 0;
-  border-top: 5px solid var(--red);
+  border-top: 5px solid var(--protein-color, var(--red));
   border-radius: 0;
   background: #fff;
   box-shadow: none;
@@ -882,6 +885,7 @@ label,
 
 .waste-card.is-holding .waste-circle {
   background: #b42335;
+  color: #fff;
 }
 
 .waste-card-top {

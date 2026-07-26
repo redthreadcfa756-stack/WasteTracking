@@ -1,20 +1,24 @@
 import type { AppSettings, DaypartConfig, DaypartId, DonationItemConfig, ProductConfig } from './types';
 
 export const DEFAULT_PRODUCTS: ProductConfig[] = [
-  { id: 'grilled-breakfast', name: 'Grilled breakfast', menus: ['breakfast'], unitCost: 2.65, averageWeightLb: 0.35, tapQuantity: 1, trackingUnit: 'each', tone: 1 },
-  { id: 'sausage', name: 'Sausage', menus: ['breakfast'], unitCost: 0.85, averageWeightLb: 0.1, tapQuantity: 1, trackingUnit: 'each', tone: 2 },
-  { id: 'folded-yellow', name: 'Folded yellow', menus: ['breakfast'], unitCost: 0.55, averageWeightLb: 0.08, tapQuantity: 1, trackingUnit: 'each', tone: 3 },
-  { id: 'folded-white', name: 'Folded white', menus: ['breakfast'], unitCost: 0.6, averageWeightLb: 0.08, tapQuantity: 1, trackingUnit: 'each', tone: 4 },
-  { id: 'scrambled', name: 'Scrambled', menus: ['breakfast'], unitCost: 0.45, averageWeightLb: 0.07, tapQuantity: 1, trackingUnit: 'each', tone: 5 },
+  { id: 'grilled-breakfast', name: 'Grilled breakfast', menus: ['breakfast'], unitCost: 2.65, averageWeightLb: 0.35, tapQuantity: 1, trackingUnit: 'each', tone: 9 },
+  { id: 'sausage', name: 'Sausage', menus: ['breakfast'], unitCost: 0.85, averageWeightLb: 0.1, tapQuantity: 1, trackingUnit: 'each', tone: 7 },
+  { id: 'folded-yellow', name: 'Folded yellow', menus: ['breakfast'], unitCost: 0.55, averageWeightLb: 0.08, tapQuantity: 1, trackingUnit: 'each', tone: 6 },
+  { id: 'folded-white', name: 'Folded white', menus: ['breakfast'], unitCost: 0.6, averageWeightLb: 0.08, tapQuantity: 1, trackingUnit: 'each', tone: 5 },
+  { id: 'scrambled', name: 'Scrambled', menus: ['breakfast'], unitCost: 0.45, averageWeightLb: 0.07, tapQuantity: 1, trackingUnit: 'each', tone: 8 },
   { id: 'breakfast-filets', name: 'Breakfast filets', menus: ['breakfast'], unitCost: 1.85, averageWeightLb: 0.35, tapQuantity: 1, trackingUnit: 'each', tone: 6 },
-  { id: 'breakfast-spicy', name: 'Breakfast spicy', menus: ['breakfast'], unitCost: 1.95, averageWeightLb: 0.35, tapQuantity: 1, trackingUnit: 'each', tone: 1 },
+  { id: 'breakfast-spicy', name: 'Breakfast spicy', menus: ['breakfast'], unitCost: 1.95, averageWeightLb: 0.35, tapQuantity: 1, trackingUnit: 'each', tone: 7 },
   { id: 'filets', name: 'Filets', menus: ['lunch'], unitCost: 2.35, averageWeightLb: 0.5, tapQuantity: 1, trackingUnit: 'each', tone: 1 },
-  { id: 'spicy', name: 'Spicy filets', menus: ['lunch'], unitCost: 2.45, averageWeightLb: 0.5, tapQuantity: 1, trackingUnit: 'each', tone: 2 },
-  { id: 'nuggets', name: 'Nuggets', menus: ['breakfast', 'lunch'], unitCost: 0.48, averageWeightLb: 0.04, tapQuantity: 14, trackingUnit: 'cup', unitsPerCup: 14, tone: 3 },
-  { id: 'strips', name: 'Strips', menus: ['lunch'], unitCost: 1.18, averageWeightLb: 0.12, tapQuantity: 1, trackingUnit: 'each', tone: 4 },
-  { id: 'grilled-nuggets', name: 'Grilled nuggets', menus: ['lunch'], unitCost: 0.62, averageWeightLb: 0.04, tapQuantity: 1, trackingUnit: 'each', tone: 5 },
-  { id: 'grilled-filets', name: 'Grilled filets', menus: ['lunch'], unitCost: 3.1, averageWeightLb: 0.45, tapQuantity: 1, trackingUnit: 'each', tone: 6 },
+  { id: 'spicy', name: 'Spicy filets', menus: ['lunch'], unitCost: 2.45, averageWeightLb: 0.5, tapQuantity: 1, trackingUnit: 'each', tone: 5 },
+  { id: 'nuggets', name: 'Nuggets', menus: ['breakfast', 'lunch'], unitCost: 0.48, averageWeightLb: 0.04, tapQuantity: 14, trackingUnit: 'cup', unitsPerCup: 14, tone: 2 },
+  { id: 'strips', name: 'Strips', menus: ['lunch'], unitCost: 1.18, averageWeightLb: 0.12, tapQuantity: 1, trackingUnit: 'each', tone: 8 },
+  { id: 'grilled-nuggets', name: 'Grilled nuggets', menus: ['lunch'], unitCost: 0.62, averageWeightLb: 0.04, tapQuantity: 1, trackingUnit: 'each', tone: 3 },
+  { id: 'grilled-filets', name: 'Grilled filets', menus: ['lunch'], unitCost: 3.1, averageWeightLb: 0.45, tapQuantity: 1, trackingUnit: 'each', tone: 4 },
 ];
+
+export const PRODUCT_TONES = Object.fromEntries(
+  DEFAULT_PRODUCTS.map((product) => [product.id, product.tone]),
+) as Record<string, number>;
 
 export const DEFAULT_DONATION_ITEMS: DonationItemConfig[] = [
   { id: 'full-strip-bacon', name: 'Full Strip Bacon', unit: 'lb', sourceProductIds: [] },

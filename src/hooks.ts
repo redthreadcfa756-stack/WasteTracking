@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { User } from 'firebase/auth';
 import { observeAuth, subscribeCooldownTimers, subscribeDonationRecord, subscribeSettings, subscribeSosForDay, subscribeWasteForDay } from './data';
-import { DEFAULT_DONATION_ITEMS } from './defaults';
+import { DEFAULT_DONATION_ITEMS, PRODUCT_TONES } from './defaults';
 import { dayKey, previousDayKey } from './domain';
 import type { AppSettings, CooldownTimer, DonationRecord, MemberProfile, SosEntry, WasteEvent } from './types';
 
@@ -99,9 +99,15 @@ export function useStoreData(storeId: string | undefined, now: Date) {
         setSettings(value ? {
           ...value,
           cooldownTimersEnabled: value.cooldownTimersEnabled ?? false,
-          products: value.products.map((product) => product.id === 'nuggets'
-            ? { ...product, menus: ['breakfast', 'lunch'] }
-            : product),
+          products: value.products.map((product) => {
+            const normalized = product.id === 'nuggets'
+              ? { ...product, menus: ['breakfast', 'lunch'] as typeof product.menus }
+              : product;
+            return {
+              ...normalized,
+              tone: PRODUCT_TONES[product.id] ?? product.tone,
+            };
+          }),
           donationItems: DEFAULT_DONATION_ITEMS.map((defaultItem) => (
             value.donationItems.find((item) => item.id === defaultItem.id) || defaultItem
           )),
