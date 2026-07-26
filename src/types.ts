@@ -54,6 +54,7 @@ export interface CooldownTimer {
   lastWasteAt: Timestamp | Date | null;
   joinedWasteCount: number;
   joinedProductIds: string[];
+  productQuantities: Record<string, number>;
   startedBy: string;
   startedByName: string;
 }

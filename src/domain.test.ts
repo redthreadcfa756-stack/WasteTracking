@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS } from './defaults';
-import { buildDonationCsv, buildWasteCsv, detectDaypart, distributeDollarTarget, donationPrediction, formatDurationInput, mergeActivity, parseDuration } from './domain';
-import type { DonationRecord, WasteEvent } from './types';
+import { adjustCooldownProductQuantities, buildDonationCsv, buildWasteCsv, cooldownProductQuantity, detectDaypart, distributeDollarTarget, donationPrediction, formatDurationInput, mergeActivity, parseDuration } from './domain';
+import type { CooldownTimer, DonationItemConfig, DonationRecord, WasteEvent } from './types';
 
 const event = (overrides: Partial<WasteEvent>): WasteEvent => ({
   id: 'event', storeId: 'store', productId: 'filets', productName: 'Filets', equivalentUnits: 1,
@@ -28,8 +28,39 @@ describe('domain rules', () => {
     expect(merged[0].displayQuantity).toBe(2);
   });
 
+  it('tracks and displays product quantities only for an active cooldown pan', () => {
+    const first = adjustCooldownProductQuantities(undefined, 'filets', 2);
+    const joined = adjustCooldownProductQuantities(first, 'filets', 3);
+    const corrected = adjustCooldownProductQuantities(joined, 'filets', -10);
+    expect(joined.filets).toBe(5);
+    expect(corrected.filets).toBe(0);
+
+    const timer: CooldownTimer = {
+      id: 'pan-3',
+      storeId: '00756',
+      panLabel: 'Pan 3',
+      active: true,
+      startedAt: new Date(),
+      expiresAt: new Date(),
+      lastWasteAt: new Date(),
+      joinedWasteCount: 2,
+      joinedProductIds: ['filets'],
+      productQuantities: joined,
+      startedBy: 'uid',
+      startedByName: 'Store team',
+    };
+    expect(cooldownProductQuantity(timer, 'filets')).toBe(5);
+    expect(cooldownProductQuantity(timer, 'spicy')).toBe(0);
+    expect(cooldownProductQuantity({ ...timer, active: false }, 'filets')).toBeNull();
+  });
+
   it('predicts donations from previous non-breakfast plus current breakfast waste', () => {
-    const item = DEFAULT_SETTINGS.donationItems.find((candidate) => candidate.id === 'filet-total')!;
+    const item: DonationItemConfig = {
+      id: 'filet-total',
+      name: 'Filet total',
+      unit: 'lb',
+      sourceProductIds: ['filets', 'breakfast-filets'],
+    };
     const predicted = donationPrediction(
       item,
       DEFAULT_SETTINGS,

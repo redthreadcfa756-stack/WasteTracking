@@ -82,7 +82,7 @@ service cloud.firestore {
     function validCooldownTimer(storeId) {
       return request.resource.data.keys().hasOnly([
           'storeId', 'panLabel', 'active', 'startedAt', 'expiresAt', 'lastWasteAt',
-          'joinedWasteCount', 'joinedProductIds', 'startedBy', 'startedByName'
+          'joinedWasteCount', 'joinedProductIds', 'productQuantities', 'startedBy', 'startedByName'
         ])
         && request.resource.data.storeId == storeId
         && request.resource.data.panLabel is string
@@ -90,6 +90,7 @@ service cloud.firestore {
         && request.resource.data.joinedWasteCount is int
         && request.resource.data.joinedWasteCount >= 0
         && request.resource.data.joinedProductIds is list
+        && request.resource.data.productQuantities is map
         && request.resource.data.startedBy is string
         && request.resource.data.startedByName is string;
     }

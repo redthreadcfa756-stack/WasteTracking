@@ -39,6 +39,7 @@ import { DEFAULT_SETTINGS } from './defaults';
 import {
   daypartWaste,
   dayKey,
+  cooldownProductQuantity,
   buildWasteTrend,
   detectDaypart,
   displayProductQuantity,
@@ -422,6 +423,7 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
           <WasteTab
             settings={settings}
             events={storeData.todayWaste}
+            cooldownTimers={storeData.cooldownTimers}
             member={member}
             deviceName={deviceName}
             effectiveMenu={effectiveMenu}
@@ -506,6 +508,7 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
 function WasteTab({
   settings,
   events,
+  cooldownTimers,
   member,
   deviceName,
   effectiveMenu,
@@ -518,6 +521,7 @@ function WasteTab({
 }: {
   settings: AppSettings;
   events: WasteEvent[];
+  cooldownTimers: CooldownTimer[];
   member: MemberProfile;
   deviceName: string;
   effectiveMenu: MenuId;
@@ -529,7 +533,6 @@ function WasteTab({
   notify: (message: string) => void;
 }) {
   const [nuggetPicker, setNuggetPicker] = useState<ProductConfig | null>(null);
-  const [busyProduct, setBusyProduct] = useState('');
   const products = settings.products.filter((product) => product.menus.includes(effectiveMenu));
   const daypart = settings.dayparts.find((candidate) => candidate.id === targetDaypartId)!;
   const menuEvents = events.filter((event) => event.menu === effectiveMenu);
@@ -541,7 +544,6 @@ function WasteTab({
     const isCup = product.trackingUnit === 'cup' && Math.abs(equivalentUnits) === (product.unitsPerCup || 14);
     const displayQuantity = isCup ? Math.sign(equivalentUnits) : equivalentUnits;
     const displayUnit = isCup ? 'cup' : 'each';
-    setBusyProduct(product.id);
     try {
       await confirmWrite(createWasteEvent({
         storeId: member.storeId,
@@ -558,13 +560,14 @@ function WasteTab({
         createdBy: member.uid,
         createdByName: member.displayName,
       }));
-      if (equivalentUnits > 0 && settings.cooldownTimersEnabled) {
+      if (settings.cooldownTimersEnabled) {
         const matchingPans = COOLDOWN_PANS.filter((pan) => pan.productIds.includes(product.id));
         await confirmWrite(Promise.all(matchingPans.map((pan) => startOrJoinCooldownTimer({
           storeId: member.storeId,
           panId: pan.id,
           panLabel: pan.label,
           productId: product.id,
+          equivalentUnits,
           createdBy: member.uid,
           createdByName: member.displayName,
         }))));
@@ -575,8 +578,6 @@ function WasteTab({
       }
     } catch (caught) {
       notify(errorMessage(caught));
-    } finally {
-      setBusyProduct('');
     }
   };
 
@@ -594,6 +595,19 @@ function WasteTab({
     if (!latest) return;
     try {
       await removeWasteEvents(member.storeId, [latest.id]);
+      if (settings.cooldownTimersEnabled) {
+        const matchingPans = COOLDOWN_PANS.filter((pan) => pan.productIds.includes(latest.productId));
+        await Promise.all(matchingPans.map((pan) => startOrJoinCooldownTimer({
+          storeId: member.storeId,
+          panId: pan.id,
+          panLabel: pan.label,
+          productId: latest.productId,
+          equivalentUnits: -latest.equivalentUnits,
+          createdBy: member.uid,
+          createdByName: member.displayName,
+          startIfInactive: false,
+        })));
+      }
       notify('Last waste entry removed.');
     } catch (caught) {
       notify(errorMessage(caught));
@@ -626,20 +640,30 @@ function WasteTab({
       <div className="waste-grid">
         {products.map((product) => {
           const totals = productWaste(menuEvents, product.id);
+          const pan = COOLDOWN_PANS.find((candidate) => candidate.productIds.includes(product.id));
+          const activeTimer = settings.cooldownTimersEnabled && pan
+            ? cooldownTimers.find((timer) => timer.id === pan.id && timer.active)
+            : undefined;
+          const currentPanUnits = cooldownProductQuantity(activeTimer, product.id);
+          const currentPanLabel = !settings.cooldownTimersEnabled
+            ? 'Cooldown pans off'
+            : !pan
+              ? 'No cooldown pan assigned'
+              : activeTimer ? `${pan.label} · Current pan` : `${pan.label} · Ready`;
           return (
             <div className="waste-card-wrap" key={product.id}>
               <WasteCard
                 product={product}
-                totalUnits={totals.units}
-                totalCost={totals.cost}
-                busy={busyProduct === product.id}
+                currentPanUnits={currentPanUnits}
+                currentPanLabel={currentPanLabel}
+                daypartUnits={totals.units}
+                daypartCost={totals.cost}
                 onAdd={() => adjustWaste(product, product.tapQuantity)}
                 onSubtract={() => subtractWaste(product, totals.units)}
               />
               {product.trackingUnit === 'cup' && (
                 <button
                   className="individual-nuggets-button"
-                  disabled={busyProduct === product.id}
                   onClick={() => setNuggetPicker(product)}
                 >
                   Add individual nuggets
@@ -693,11 +717,12 @@ function WasteTab({
   );
 }
 
-function WasteCard({ product, totalUnits, totalCost, busy, onAdd, onSubtract }: {
+function WasteCard({ product, currentPanUnits, currentPanLabel, daypartUnits, daypartCost, onAdd, onSubtract }: {
   product: ProductConfig;
-  totalUnits: number;
-  totalCost: number;
-  busy: boolean;
+  currentPanUnits: number | null;
+  currentPanLabel: string;
+  daypartUnits: number;
+  daypartCost: number;
   onAdd: () => void;
   onSubtract: () => void;
 }) {
@@ -724,7 +749,6 @@ function WasteCard({ product, totalUnits, totalCost, busy, onAdd, onSubtract }: 
   return (
     <button
       className={`waste-card tone-${product.tone}${holding ? ' is-holding' : ''}`}
-      disabled={busy}
       onPointerDown={startPress}
       onPointerUp={endPress}
       onPointerCancel={endPress}
@@ -742,8 +766,13 @@ function WasteCard({ product, totalUnits, totalCost, busy, onAdd, onSubtract }: 
         <span className="waste-circle">{holding ? '−' : '+'}</span>
         <span>{product.name}</span>
       </span>
-      <span className="waste-total">{displayProductQuantity(product, totalUnits)}</span>
-      <span>{formatMoney(totalCost)} wasted</span>
+      <span className="waste-pan-label">{currentPanLabel}</span>
+      <span className={`waste-total${currentPanUnits === null ? ' empty' : ''}`}>
+        {currentPanUnits === null ? 'No active pan' : displayProductQuantity(product, currentPanUnits)}
+      </span>
+      <span className="waste-daypart-total">
+        Daypart: {displayProductQuantity(product, daypartUnits)} · {formatMoney(daypartCost)}
+      </span>
       <span className="waste-hint">Tap to add · Hold to subtract</span>
     </button>
   );

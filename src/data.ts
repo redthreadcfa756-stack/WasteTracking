@@ -27,6 +27,7 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore';
 import { auth, db } from './firebase';
+import { adjustCooldownProductQuantities } from './domain';
 import type { AppSettings, CooldownPanId, CooldownTimer, DonationRecord, MemberProfile, SosEntry, WasteEvent } from './types';
 
 function requireFirebase() {
@@ -146,15 +147,19 @@ export async function startOrJoinCooldownTimer({
   panId,
   panLabel,
   productId,
+  equivalentUnits,
   createdBy,
   createdByName,
+  startIfInactive = true,
 }: {
   storeId: string;
   panId: CooldownPanId;
   panLabel: string;
   productId: string;
+  equivalentUnits: number;
   createdBy: string;
   createdByName: string;
+  startIfInactive?: boolean;
 }): Promise<void> {
   const services = requireFirebase();
   const timerRef = doc(services.db, 'stores', storeId, 'cooldownTimers', panId);
@@ -165,11 +170,15 @@ export async function startOrJoinCooldownTimer({
     if (existing?.active) {
       transaction.update(timerRef, {
         lastWasteAt: now,
-        joinedWasteCount: (existing.joinedWasteCount || 0) + 1,
-        joinedProductIds: [...new Set([...(existing.joinedProductIds || []), productId])],
+        joinedWasteCount: (existing.joinedWasteCount || 0) + (equivalentUnits > 0 ? 1 : 0),
+        joinedProductIds: equivalentUnits > 0
+          ? [...new Set([...(existing.joinedProductIds || []), productId])]
+          : existing.joinedProductIds || [],
+        productQuantities: adjustCooldownProductQuantities(existing.productQuantities, productId, equivalentUnits),
       });
       return;
     }
+    if (!startIfInactive || equivalentUnits <= 0) return;
     transaction.set(timerRef, {
       storeId,
       panLabel,
@@ -179,6 +188,7 @@ export async function startOrJoinCooldownTimer({
       lastWasteAt: now,
       joinedWasteCount: 1,
       joinedProductIds: [productId],
+      productQuantities: { [productId]: equivalentUnits },
       startedBy: createdBy,
       startedByName: createdByName,
     });
@@ -196,6 +206,7 @@ export async function resetCooldownTimer(storeId: string, panId: CooldownPanId):
     lastWasteAt: serverTimestamp(),
     joinedWasteCount: 0,
     joinedProductIds: [],
+    productQuantities: {},
     startedBy: services.auth.currentUser?.uid || '',
     startedByName: '',
   }, { merge: true });

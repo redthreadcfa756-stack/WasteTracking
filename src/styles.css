@@ -860,8 +860,27 @@ label,
   border-radius: 0;
 }
 
+.waste-pan-label {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .waste-total {
   font-size: 2rem;
+}
+
+.waste-total.empty {
+  font-size: 1.25rem;
+  letter-spacing: -0.02em;
+}
+
+.waste-daypart-total {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 700;
 }
 
 .waste-hint {

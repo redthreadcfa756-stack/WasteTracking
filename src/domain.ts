@@ -1,5 +1,6 @@
 import type {
   AppSettings,
+  CooldownTimer,
   DaypartConfig,
   DaypartId,
   DonationItemConfig,
@@ -28,6 +29,25 @@ export function detectDaypart(dayparts: DaypartConfig[], date = new Date()): Day
   if (matching) return matching.id;
   if (minutes < dayparts[0].startMinutes) return 'breakfast';
   return 'late-dinner';
+}
+
+export function adjustCooldownProductQuantities(
+  current: Record<string, number> | undefined,
+  productId: string,
+  equivalentUnits: number,
+): Record<string, number> {
+  return {
+    ...current,
+    [productId]: Math.max(0, (current?.[productId] || 0) + equivalentUnits),
+  };
+}
+
+export function cooldownProductQuantity(
+  timer: CooldownTimer | undefined,
+  productId: string,
+): number | null {
+  if (!timer?.active) return null;
+  return Math.max(0, timer.productQuantities?.[productId] || 0);
 }
 
 export function formatMoney(value: number): string {
