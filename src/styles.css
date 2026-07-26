@@ -364,6 +364,14 @@ code { font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.9em; }
   height: 24px;
   margin: 0;
 }
+.toggle-copy {
+  display: grid;
+  gap: 0.2rem;
+}
+.toggle-copy small {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
 .full-row { grid-column: 1 / -1; }
 
 .data-table-wrap {
@@ -793,6 +801,37 @@ label,
 
 .waste-grid {
   gap: 0.65rem;
+}
+
+.test-daypart-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem;
+  border-left: 7px solid #b7791f;
+  background: #fff7e6;
+}
+
+.test-daypart-banner > div {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.test-daypart-banner strong {
+  color: #7a4b00;
+  font-family: "Space Grotesk", Inter, sans-serif;
+  text-transform: uppercase;
+}
+
+.test-daypart-banner span {
+  color: #6b4c1f;
+  font-size: 0.82rem;
+}
+
+.test-daypart-banner button {
+  flex: 0 0 auto;
 }
 
 .waste-card-wrap {

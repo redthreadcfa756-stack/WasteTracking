@@ -301,6 +301,8 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
   const settings = storeData.settings || DEFAULT_SETTINGS;
   const [activeTab, setActiveTab] = useState<TabId>('waste');
   const [menuSelection, setMenuSelection] = useState<MenuSelection>('auto');
+  const [testDaypartEnabled, setTestDaypartEnabled] = useState(false);
+  const [testWasteEvents, setTestWasteEvents] = useState<WasteEvent[]>([]);
   const [adminPrompt, setAdminPrompt] = useState(false);
   const [warning, setWarning] = useState<{ daypart: string; total: number; target: number } | null>(null);
   const [warningMutedUntil, setWarningMutedUntil] = useState(0);
@@ -314,6 +316,10 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
   }, []);
 
   useEffect(() => {
+    if (!testDaypartEnabled) setTestWasteEvents([]);
+  }, [testDaypartEnabled]);
+
+  useEffect(() => {
     const primeAudio = () => {
       const context = getCooldownAudioContext();
       if (context?.state === 'suspended') void context.resume();
@@ -322,7 +328,8 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
     return () => window.removeEventListener('pointerdown', primeAudio);
   }, []);
 
-  const expiredTimer = settings.cooldownTimersEnabled
+  const testDaypartActive = testDaypartEnabled && activeTab === 'waste';
+  const expiredTimer = settings.cooldownTimersEnabled && !testDaypartActive
     ? storeData.cooldownTimers.find((timer) => timer.active && timestampMillis(timer.expiresAt) <= timerNow)
     : undefined;
 
@@ -390,7 +397,7 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
         </div>
       </header>
 
-      {settings.cooldownTimersEnabled && (
+      {settings.cooldownTimersEnabled && !testDaypartActive && (
         <section className="cooldown-strip" aria-label="Cooldown pan timers">
           {COOLDOWN_PANS.map((pan) => {
             const timer = storeData.cooldownTimers.find((candidate) => candidate.id === pan.id && candidate.active);
@@ -424,6 +431,9 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
             settings={settings}
             events={storeData.todayWaste}
             cooldownTimers={storeData.cooldownTimers}
+            testMode={testDaypartEnabled}
+            testEvents={testWasteEvents}
+            setTestEvents={setTestWasteEvents}
             member={member}
             deviceName={deviceName}
             effectiveMenu={effectiveMenu}
@@ -458,7 +468,14 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
           />
         )}
         {activeTab === 'admin' && (
-          <AdminTab settings={settings} member={member} deviceName={deviceName} notify={notify} />
+          <AdminTab
+            settings={settings}
+            member={member}
+            deviceName={deviceName}
+            testDaypartEnabled={testDaypartEnabled}
+            setTestDaypartEnabled={setTestDaypartEnabled}
+            notify={notify}
+          />
         )}
       </main>
 
@@ -509,6 +526,9 @@ function WasteTab({
   settings,
   events,
   cooldownTimers,
+  testMode,
+  testEvents,
+  setTestEvents,
   member,
   deviceName,
   effectiveMenu,
@@ -522,6 +542,9 @@ function WasteTab({
   settings: AppSettings;
   events: WasteEvent[];
   cooldownTimers: CooldownTimer[];
+  testMode: boolean;
+  testEvents: WasteEvent[];
+  setTestEvents: (update: (events: WasteEvent[]) => WasteEvent[]) => void;
   member: MemberProfile;
   deviceName: string;
   effectiveMenu: MenuId;
@@ -535,8 +558,9 @@ function WasteTab({
   const [nuggetPicker, setNuggetPicker] = useState<ProductConfig | null>(null);
   const products = settings.products.filter((product) => product.menus.includes(effectiveMenu));
   const daypart = settings.dayparts.find((candidate) => candidate.id === targetDaypartId)!;
-  const menuEvents = events.filter((event) => event.menu === effectiveMenu);
-  const activeWaste = daypartWaste(events, targetDaypartId);
+  const displayedEvents = testMode ? testEvents : events;
+  const menuEvents = displayedEvents.filter((event) => event.menu === effectiveMenu);
+  const activeWaste = daypartWaste(displayedEvents, targetDaypartId);
   const merged = mergeActivity(menuEvents, settings.products);
   const totalCost = menuEvents.reduce((sum, event) => sum + event.equivalentUnits * event.unitCostSnapshot, 0);
 
@@ -544,22 +568,34 @@ function WasteTab({
     const isCup = product.trackingUnit === 'cup' && Math.abs(equivalentUnits) === (product.unitsPerCup || 14);
     const displayQuantity = isCup ? Math.sign(equivalentUnits) : equivalentUnits;
     const displayUnit = isCup ? 'cup' : 'each';
+    const eventData: Omit<WasteEvent, 'id' | 'eventAt'> = {
+      storeId: member.storeId,
+      productId: product.id,
+      productName: product.name,
+      equivalentUnits,
+      displayQuantity,
+      displayUnit,
+      unitCostSnapshot: product.unitCost,
+      dayKey: dayKey(),
+      daypartId: targetDaypartId,
+      menu: effectiveMenu,
+      deviceName,
+      createdBy: member.uid,
+      createdByName: member.displayName,
+    };
+
+    if (testMode) {
+      const testEvent: WasteEvent = {
+        id: `test-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        eventAt: new Date(),
+        ...eventData,
+      };
+      setTestEvents((current) => [testEvent, ...current]);
+      return;
+    }
+
     try {
-      await confirmWrite(createWasteEvent({
-        storeId: member.storeId,
-        productId: product.id,
-        productName: product.name,
-        equivalentUnits,
-        displayQuantity,
-        displayUnit,
-        unitCostSnapshot: product.unitCost,
-        dayKey: dayKey(),
-        daypartId: targetDaypartId,
-        menu: effectiveMenu,
-        deviceName,
-        createdBy: member.uid,
-        createdByName: member.displayName,
-      }));
+      await confirmWrite(createWasteEvent(eventData));
       if (settings.cooldownTimersEnabled) {
         const matchingPans = COOLDOWN_PANS.filter((pan) => pan.productIds.includes(product.id));
         await confirmWrite(Promise.all(matchingPans.map((pan) => startOrJoinCooldownTimer({
@@ -591,8 +627,13 @@ function WasteTab({
   };
 
   const undoLast = async () => {
-    const latest = events.find((event) => event.createdBy === member.uid);
+    const latest = displayedEvents.find((event) => event.createdBy === member.uid);
     if (!latest) return;
+    if (testMode) {
+      setTestEvents((current) => current.filter((event) => event.id !== latest.id));
+      notify('Last test entry removed.');
+      return;
+    }
     try {
       await removeWasteEvents(member.storeId, [latest.id]);
       if (settings.cooldownTimersEnabled) {
@@ -616,10 +657,30 @@ function WasteTab({
 
   return (
     <section className="panel-stack">
+      {testMode && (
+        <div className="test-daypart-banner" role="status">
+          <div>
+            <strong>Test Daypart · This device only</strong>
+            <span>Nothing entered here is saved or sent to Firebase.</span>
+          </div>
+          <button
+            className="secondary-button small"
+            disabled={testEvents.length === 0}
+            onClick={() => {
+              setTestEvents(() => []);
+              notify('Test Daypart reset.');
+            }}
+          >
+            <RotateCcw aria-hidden="true" /> Reset test
+          </button>
+        </div>
+      )}
       <div className="section-heading">
         <div>
-          <p className="eyebrow">{daypart.label} · {formatMinutes(daypart.startMinutes)}–{formatMinutes(daypart.endMinutes)}</p>
-          <h2>Tap waste as it happens</h2>
+          <p className="eyebrow">
+            {testMode ? 'Test Daypart · Local session' : `${daypart.label} · ${formatMinutes(daypart.startMinutes)}–${formatMinutes(daypart.endMinutes)}`}
+          </p>
+          <h2>{testMode ? 'Practice waste entry' : 'Tap waste as it happens'}</h2>
         </div>
         <label className="compact-control">
           Menu
@@ -632,24 +693,28 @@ function WasteTab({
       </div>
 
       <div className="stat-grid">
-        <Stat label="Menu waste" value={formatMoney(totalCost)} detail={effectiveMenu === 'breakfast' ? 'Breakfast items' : 'Lunch items'} />
-        <Stat label={`${daypart.label} target`} value={formatMoney(daypart.totalDollarTarget)} detail={`${formatMoney(activeWaste.cost)} used`} />
-        <Stat label="Target remaining" value={formatMoney(Math.max(0, daypart.totalDollarTarget - activeWaste.cost))} detail={activeWaste.cost > daypart.totalDollarTarget ? 'Over target' : 'Live from all devices'} tone={activeWaste.cost > daypart.totalDollarTarget ? 'danger' : undefined} />
+        <Stat label={testMode ? 'Test waste' : 'Menu waste'} value={formatMoney(totalCost)} detail={testMode ? 'Not saved' : effectiveMenu === 'breakfast' ? 'Breakfast items' : 'Lunch items'} />
+        <Stat label={testMode ? `${daypart.label} test target` : `${daypart.label} target`} value={formatMoney(daypart.totalDollarTarget)} detail={`${formatMoney(activeWaste.cost)} ${testMode ? 'simulated' : 'used'}`} />
+        <Stat label="Target remaining" value={formatMoney(Math.max(0, daypart.totalDollarTarget - activeWaste.cost))} detail={testMode ? 'Local-only totals' : activeWaste.cost > daypart.totalDollarTarget ? 'Over target' : 'Live from all devices'} tone={!testMode && activeWaste.cost > daypart.totalDollarTarget ? 'danger' : undefined} />
       </div>
 
       <div className="waste-grid">
         {products.map((product) => {
           const totals = productWaste(menuEvents, product.id);
           const pan = COOLDOWN_PANS.find((candidate) => candidate.productIds.includes(product.id));
-          const activeTimer = settings.cooldownTimersEnabled && pan
+          const activeTimer = !testMode && settings.cooldownTimersEnabled && pan
             ? cooldownTimers.find((timer) => timer.id === pan.id && timer.active)
             : undefined;
-          const currentPanUnits = cooldownProductQuantity(activeTimer, product.id);
-          const currentPanLabel = !settings.cooldownTimersEnabled
-            ? 'Cooldown pans off'
-            : !pan
-              ? 'No cooldown pan assigned'
-              : activeTimer ? `${pan.label} · Current pan` : `${pan.label} · Ready`;
+          const currentPanUnits = testMode
+            ? pan ? Math.max(0, totals.units) : null
+            : cooldownProductQuantity(activeTimer, product.id);
+          const currentPanLabel = testMode
+            ? pan ? `${pan.label} · Test pan` : 'No cooldown pan assigned'
+            : !settings.cooldownTimersEnabled
+              ? 'Cooldown pans off'
+              : !pan
+                ? 'No cooldown pan assigned'
+                : activeTimer ? `${pan.label} · Current pan` : `${pan.label} · Ready`;
           return (
             <div className="waste-card-wrap" key={product.id}>
               <WasteCard
@@ -676,15 +741,15 @@ function WasteTab({
 
       <div className="section-heading activity-heading">
         <div>
-          <p className="eyebrow">Merged by product and minute</p>
-          <h2>Recent activity</h2>
+          <p className="eyebrow">{testMode ? 'Temporary entries · Not saved' : 'Merged by product and minute'}</p>
+          <h2>{testMode ? 'Test activity' : 'Recent activity'}</h2>
         </div>
-        <button className="secondary-button small" onClick={undoLast} disabled={!events.some((event) => event.createdBy === member.uid)}>
+        <button className="secondary-button small" onClick={undoLast} disabled={!displayedEvents.some((event) => event.createdBy === member.uid)}>
           <RotateCcw aria-hidden="true" /> Undo last
         </button>
       </div>
       <div className="activity-list">
-        {merged.length === 0 && <EmptyState>No waste logged for this menu yet.</EmptyState>}
+        {merged.length === 0 && <EmptyState>{testMode ? 'No test waste entered for this menu.' : 'No waste logged for this menu yet.'}</EmptyState>}
         {merged.slice(0, 12).map((entry) => {
           const product = settings.products.find((candidate) => candidate.id === entry.productId)!;
           return (
@@ -1058,10 +1123,12 @@ function DonationSubmit({ existing, onClose, onSubmit }: {
   );
 }
 
-function AdminTab({ settings, member, deviceName, notify }: {
+function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDaypartEnabled, notify }: {
   settings: AppSettings;
   member: MemberProfile;
   deviceName: string;
+  testDaypartEnabled: boolean;
+  setTestDaypartEnabled: (enabled: boolean) => void;
   notify: (message: string) => void;
 }) {
   const storeId = member.storeId;
@@ -1291,6 +1358,17 @@ function AdminTab({ settings, member, deviceName, notify }: {
             }))}
           />
           <span>Enable one-hour cooldown pan timers</span>
+        </label>
+        <label className="toggle-row">
+          <input
+            type="checkbox"
+            checked={testDaypartEnabled}
+            onChange={(event) => setTestDaypartEnabled(event.target.checked)}
+          />
+          <span className="toggle-copy">
+            <strong>Enable Test Daypart</strong>
+            <small>This device only · Test entries are never saved</small>
+          </span>
         </label>
       </div>
       <details className="admin-dropdown">
