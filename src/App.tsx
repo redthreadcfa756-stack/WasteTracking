@@ -13,11 +13,13 @@ import {
   ShieldCheck,
   Snowflake,
   Timer,
+  Trash2,
   X,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import type { User } from 'firebase/auth';
 import {
+  createDiscardEvent,
   createWasteEvent,
   loadDonationRecordsForDateRange,
   loadDemoDonationRecordsForDateRange,
@@ -25,6 +27,7 @@ import {
   loadWasteForDateRange,
   login,
   logout,
+  removeDiscardEvents,
   removeWasteEvents,
   removeExportDemoData,
   resetAllCooldownTimers,
@@ -49,6 +52,7 @@ import {
   formatMoney,
   formatQuantity,
   mergeActivity,
+  mergeDiscardActivity,
   parseDuration,
   productWaste,
   targetDollarForProduct,
@@ -62,6 +66,8 @@ import type {
   CooldownPanId,
   CooldownTimer,
   DaypartId,
+  DiscardEvent,
+  DiscardReason,
   DonationItemConfig,
   DonationRecord,
   MemberProfile,
@@ -71,7 +77,7 @@ import type {
   WasteEvent,
 } from './types';
 
-type TabId = 'waste' | 'sos' | 'donations' | 'admin';
+type TabId = 'waste' | 'discard' | 'sos' | 'donations' | 'admin';
 type MenuSelection = 'auto' | MenuId;
 type ExportPeriod = 1 | 30 | 60 | 90 | 'custom';
 const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || '00756';
@@ -86,6 +92,18 @@ const COOLDOWN_PANS: Array<{
   { id: 'pan-3', label: 'Pan 3', productIds: ['filets'] },
   { id: 'pan-4', label: 'Bottom pan (Pan 4)', productIds: ['spicy'] },
 ];
+const DISCARD_REASONS: Array<{ id: DiscardReason; label: string }> = [
+  { id: 'dropped', label: 'Dropped' },
+  { id: 'raw', label: 'Raw / undercooked' },
+  { id: 'overcooked', label: 'Overcooked' },
+  { id: 'contaminated', label: 'Contaminated' },
+  { id: 'quality', label: 'Quality issue' },
+  { id: 'other', label: 'Other' },
+];
+
+function discardReasonLabel(reason: DiscardReason): string {
+  return DISCARD_REASONS.find((option) => option.id === reason)?.label || reason;
+}
 
 function confirmWrite<T>(write: Promise<T>): Promise<T> {
   return Promise.race([
@@ -198,6 +216,7 @@ function CooldownTimerItem({
 
 const TABS: Array<{ id: TabId; label: string; icon: typeof Snowflake }> = [
   { id: 'waste', label: 'Cool Down', icon: Snowflake },
+  { id: 'discard', label: 'Discard', icon: Trash2 },
   { id: 'sos', label: 'SOS', icon: Timer },
   { id: 'donations', label: 'Donations', icon: Gift },
   { id: 'admin', label: 'Admin', icon: Settings },
@@ -309,6 +328,10 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
   const [toast, setToast] = useState('');
   const [timerNow, setTimerNow] = useState(Date.now());
   const alertedTimers = useRef(new Set<string>());
+  const visibleTabs = TABS.filter((tab) => (
+    (tab.id !== 'sos' || settings.sosEnabled)
+    && (tab.id !== 'discard' || settings.discardTrackingEnabled)
+  ));
 
   useEffect(() => {
     const interval = window.setInterval(() => setTimerNow(Date.now()), 1_000);
@@ -318,6 +341,15 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
   useEffect(() => {
     if (!testDaypartEnabled) setTestWasteEvents([]);
   }, [testDaypartEnabled]);
+
+  useEffect(() => {
+    if (
+      (activeTab === 'sos' && !settings.sosEnabled)
+      || (activeTab === 'discard' && !settings.discardTrackingEnabled)
+    ) {
+      setActiveTab('waste');
+    }
+  }, [activeTab, settings.sosEnabled, settings.discardTrackingEnabled]);
 
   useEffect(() => {
     const primeAudio = () => {
@@ -416,8 +448,12 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
 
       {storeData.error && <div className="error-banner" role="alert">{storeData.error}</div>}
 
-      <nav className="tabbar" aria-label="Primary">
-        {TABS.map(({ id, label, icon: Icon }) => (
+      <nav
+        className={`tabbar tab-count-${visibleTabs.length}`}
+        aria-label="Primary"
+        style={{ gridTemplateColumns: `repeat(${visibleTabs.length}, minmax(0, 1fr))` }}
+      >
+        {visibleTabs.map(({ id, label, icon: Icon }) => (
           <button key={id} className={activeTab === id ? 'active' : ''} onClick={() => selectTab(id)} aria-current={activeTab === id ? 'page' : undefined}>
             <Icon aria-hidden="true" />
             <span>{label}</span>
@@ -445,7 +481,20 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
             notify={notify}
           />
         )}
-        {activeTab === 'sos' && (
+        {activeTab === 'discard' && settings.discardTrackingEnabled && (
+          <DiscardTab
+            settings={settings}
+            events={storeData.discardEvents}
+            member={member}
+            deviceName={deviceName}
+            effectiveMenu={effectiveMenu}
+            menuSelection={menuSelection}
+            setMenuSelection={setMenuSelection}
+            targetDaypartId={targetDaypartId}
+            notify={notify}
+          />
+        )}
+        {activeTab === 'sos' && settings.sosEnabled && (
           <SosTab
             settings={settings}
             entries={storeData.sosEntries}
@@ -844,6 +893,285 @@ function WasteCard({ product, currentPanUnits, currentPanLabel, daypartUnits, da
       <span className="waste-daypart-total">
         Daypart: {displayProductQuantity(product, daypartUnits)} · {formatMoney(daypartCost)}
       </span>
+      <span className="waste-hint">Tap to add · Hold to subtract</span>
+    </button>
+  );
+}
+
+function DiscardTab({
+  settings,
+  events,
+  member,
+  deviceName,
+  effectiveMenu,
+  menuSelection,
+  setMenuSelection,
+  targetDaypartId,
+  notify,
+}: {
+  settings: AppSettings;
+  events: DiscardEvent[];
+  member: MemberProfile;
+  deviceName: string;
+  effectiveMenu: MenuId;
+  menuSelection: MenuSelection;
+  setMenuSelection: (selection: MenuSelection) => void;
+  targetDaypartId: DaypartId;
+  notify: (message: string) => void;
+}) {
+  const [selectedReason, setSelectedReason] = useState<DiscardReason | null>(null);
+  const [reasonDetail, setReasonDetail] = useState('');
+  const [nuggetPicker, setNuggetPicker] = useState<ProductConfig | null>(null);
+  const products = settings.products.filter((product) => product.menus.includes(effectiveMenu));
+  const daypart = settings.dayparts.find((candidate) => candidate.id === targetDaypartId)!;
+  const menuEvents = events.filter((event) => event.menu === effectiveMenu);
+  const activeEvents = menuEvents.filter((event) => event.daypartId === targetDaypartId);
+  const activeDiscard = daypartWaste(activeEvents, targetDaypartId);
+  const merged = mergeDiscardActivity(menuEvents, settings.products);
+
+  const reasonReady = () => {
+    if (!selectedReason) {
+      notify('Choose a discard reason before logging a product.');
+      return false;
+    }
+    if (selectedReason === 'other' && !reasonDetail.trim()) {
+      notify('Add a short explanation for the Other reason.');
+      return false;
+    }
+    return true;
+  };
+
+  const adjustDiscard = async (product: ProductConfig, equivalentUnits: number) => {
+    if (!reasonReady() || !selectedReason) return;
+    const isCup = product.trackingUnit === 'cup' && Math.abs(equivalentUnits) === (product.unitsPerCup || 14);
+    const eventData: Omit<DiscardEvent, 'id' | 'eventAt'> = {
+      storeId: member.storeId,
+      productId: product.id,
+      productName: product.name,
+      equivalentUnits,
+      displayQuantity: isCup ? Math.sign(equivalentUnits) : equivalentUnits,
+      displayUnit: isCup ? 'cup' : 'each',
+      unitCostSnapshot: product.unitCost,
+      dayKey: dayKey(),
+      daypartId: targetDaypartId,
+      menu: effectiveMenu,
+      deviceName,
+      createdBy: member.uid,
+      createdByName: member.displayName,
+      reason: selectedReason,
+      reasonDetail: selectedReason === 'other' ? reasonDetail.trim() : '',
+    };
+
+    try {
+      await confirmWrite(createDiscardEvent(eventData));
+    } catch (caught) {
+      notify(errorMessage(caught));
+    }
+  };
+
+  const subtractDiscard = (product: ProductConfig, totalUnits: number) => {
+    if (totalUnits <= 0) {
+      notify(`No ${product.name} discard entry to subtract.`);
+      return;
+    }
+    void adjustDiscard(product, -Math.min(product.tapQuantity, totalUnits));
+  };
+
+  const undoLast = async () => {
+    const latest = events.find((event) => event.createdBy === member.uid);
+    if (!latest) return;
+    try {
+      await removeDiscardEvents(member.storeId, [latest.id]);
+      notify('Last discard entry removed.');
+    } catch (caught) {
+      notify(errorMessage(caught));
+    }
+  };
+
+  return (
+    <section className="panel-stack">
+      <div className="section-heading">
+        <div>
+          <p className="eyebrow">{daypart.label} · Direct to trash</p>
+          <h2>Log product that skips cool down</h2>
+        </div>
+        <label className="compact-control">
+          Menu
+          <select value={menuSelection} onChange={(event) => setMenuSelection(event.target.value as MenuSelection)}>
+            <option value="auto">Auto · {effectiveMenu === 'breakfast' ? 'Breakfast' : 'Lunch'}</option>
+            <option value="breakfast">Breakfast override</option>
+            <option value="lunch">Lunch override</option>
+          </select>
+        </label>
+      </div>
+
+      <div className="discard-reason-panel">
+        <div>
+          <strong>1. Choose why it was discarded</strong>
+          <span>The selected reason stays active for rapid product entry.</span>
+        </div>
+        <div className="discard-reason-grid" role="group" aria-label="Discard reason">
+          {DISCARD_REASONS.map((reason) => (
+            <button
+              type="button"
+              key={reason.id}
+              className={selectedReason === reason.id ? 'active' : ''}
+              aria-pressed={selectedReason === reason.id}
+              onClick={() => {
+                setSelectedReason(reason.id);
+                if (reason.id !== 'other') setReasonDetail('');
+              }}
+            >
+              {reason.label}
+            </button>
+          ))}
+        </div>
+        {selectedReason === 'other' && (
+          <label>
+            What happened?
+            <input
+              autoFocus
+              maxLength={120}
+              placeholder="Short explanation"
+              value={reasonDetail}
+              onChange={(event) => setReasonDetail(event.target.value)}
+            />
+          </label>
+        )}
+      </div>
+
+      <div className="stat-grid one">
+        <Stat
+          label={`${daypart.label} direct discard`}
+          value={formatMoney(activeDiscard.cost)}
+          detail="Kept separate from Cool Down, targets, and donations"
+          tone={activeDiscard.cost > 0 ? 'danger' : undefined}
+        />
+      </div>
+
+      <div>
+        <p className="discard-step-label">2. Tap each product sent directly to trash</p>
+        <div className="waste-grid">
+          {products.map((product) => {
+            const totals = productWaste(activeEvents, product.id);
+            return (
+              <div className="waste-card-wrap" key={product.id}>
+                <DiscardCard
+                  product={product}
+                  daypartUnits={totals.units}
+                  daypartCost={totals.cost}
+                  reasonLabel={selectedReason ? discardReasonLabel(selectedReason) : ''}
+                  onAdd={() => void adjustDiscard(product, product.tapQuantity)}
+                  onSubtract={() => subtractDiscard(product, totals.units)}
+                />
+                {product.trackingUnit === 'cup' && (
+                  <button
+                    className="individual-nuggets-button"
+                    onClick={() => {
+                      if (reasonReady()) setNuggetPicker(product);
+                    }}
+                  >
+                    Add individual nuggets
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="section-heading activity-heading">
+        <div><p className="eyebrow">Merged by product, reason, and minute</p><h2>Recent discard activity</h2></div>
+        <button className="secondary-button small" onClick={undoLast} disabled={!events.some((event) => event.createdBy === member.uid)}>
+          <RotateCcw aria-hidden="true" /> Undo last
+        </button>
+      </div>
+      <div className="activity-list">
+        {merged.length === 0 && <EmptyState>No direct discard logged for this menu yet.</EmptyState>}
+        {merged.slice(0, 12).map((entry) => {
+          const product = settings.products.find((candidate) => candidate.id === entry.productId)!;
+          const reason = `${discardReasonLabel(entry.reason)}${entry.reasonDetail ? ` · ${entry.reasonDetail}` : ''}`;
+          return (
+            <div className="activity-row" key={entry.key}>
+              <span className={`activity-dot tone-${product.tone}`} />
+              <div>
+                <strong>{displayProductQuantity(product, entry.equivalentUnits)} {product.name}</strong>
+                <span>{reason} · {entry.occurredAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} · {entry.deviceNames.join(', ')}</span>
+              </div>
+              <strong>{formatMoney(entry.cost)}</strong>
+            </div>
+          );
+        })}
+      </div>
+
+      {nuggetPicker && (
+        <Modal title="Add individual discarded nuggets" onClose={() => setNuggetPicker(null)}>
+          <p>Choose how many individual nuggets went directly to trash.</p>
+          <div className="number-grid">
+            {Array.from({ length: 13 }, (_, index) => index + 1).map((count) => (
+              <button key={count} onClick={() => {
+                void adjustDiscard(nuggetPicker, count);
+                setNuggetPicker(null);
+              }}>{count}</button>
+            ))}
+          </div>
+        </Modal>
+      )}
+    </section>
+  );
+}
+
+function DiscardCard({ product, daypartUnits, daypartCost, reasonLabel, onAdd, onSubtract }: {
+  product: ProductConfig;
+  daypartUnits: number;
+  daypartCost: number;
+  reasonLabel: string;
+  onAdd: () => void;
+  onSubtract: () => void;
+}) {
+  const timer = useRef<number | null>(null);
+  const longPressed = useRef(false);
+  const [holding, setHolding] = useState(false);
+
+  const startPress = () => {
+    longPressed.current = false;
+    setHolding(true);
+    timer.current = window.setTimeout(() => {
+      longPressed.current = true;
+      setHolding(false);
+      onSubtract();
+      navigator.vibrate?.(40);
+    }, 650);
+  };
+  const endPress = () => {
+    if (timer.current) window.clearTimeout(timer.current);
+    timer.current = null;
+    setHolding(false);
+  };
+
+  return (
+    <button
+      className={`waste-card discard-card tone-${product.tone}${holding ? ' is-holding' : ''}`}
+      onPointerDown={startPress}
+      onPointerUp={endPress}
+      onPointerCancel={endPress}
+      onPointerLeave={endPress}
+      onContextMenu={(event) => event.preventDefault()}
+      onClick={() => {
+        if (longPressed.current) {
+          longPressed.current = false;
+          return;
+        }
+        onAdd();
+      }}
+    >
+      <span className="waste-card-top">
+        <span className="waste-circle">{holding ? '−' : '+'}</span>
+        <span>{product.name}</span>
+      </span>
+      <span className="waste-pan-label">Daypart direct discard</span>
+      <span className="waste-total">{displayProductQuantity(product, daypartUnits)}</span>
+      <span className="waste-daypart-total">{formatMoney(daypartCost)} · {reasonLabel || 'Choose a reason above'}</span>
       <span className="waste-hint">Tap to add · Hold to subtract</span>
     </button>
   );
@@ -1364,6 +1692,34 @@ function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDay
             }))}
           />
           <span>Enable one-hour cooldown pan timers</span>
+        </label>
+        <label className="toggle-row">
+          <input
+            type="checkbox"
+            checked={draft.sosEnabled}
+            onChange={(event) => setDraft((current) => ({
+              ...current,
+              sosEnabled: event.target.checked,
+            }))}
+          />
+          <span className="toggle-copy">
+            <strong>Show SOS tab</strong>
+            <small>Shared across every device after saving</small>
+          </span>
+        </label>
+        <label className="toggle-row">
+          <input
+            type="checkbox"
+            checked={draft.discardTrackingEnabled}
+            onChange={(event) => setDraft((current) => ({
+              ...current,
+              discardTrackingEnabled: event.target.checked,
+            }))}
+          />
+          <span className="toggle-copy">
+            <strong>Show Discard tab</strong>
+            <small>Track product sent directly to trash</small>
+          </span>
         </label>
         <label className="toggle-row">
           <input

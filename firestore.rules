@@ -34,6 +34,33 @@ service cloud.firestore {
         && request.resource.data.menu in ['breakfast', 'lunch'];
     }
 
+    function validDiscardEvent(storeId) {
+      return request.resource.data.keys().hasOnly([
+          'storeId', 'productId', 'productName', 'equivalentUnits', 'displayQuantity',
+          'displayUnit', 'unitCostSnapshot', 'eventAt', 'dayKey', 'daypartId', 'menu',
+          'deviceName', 'createdBy', 'createdByName', 'reason', 'reasonDetail'
+        ])
+        && request.resource.data.storeId == storeId
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.productId is string
+        && request.resource.data.productName is string
+        && request.resource.data.equivalentUnits is number
+        && request.resource.data.equivalentUnits != 0
+        && request.resource.data.equivalentUnits >= -1000
+        && request.resource.data.equivalentUnits <= 1000
+        && request.resource.data.displayQuantity is number
+        && request.resource.data.displayUnit in ['each', 'cup']
+        && request.resource.data.unitCostSnapshot is number
+        && request.resource.data.unitCostSnapshot >= 0
+        && request.resource.data.eventAt is timestamp
+        && request.resource.data.dayKey is string
+        && request.resource.data.daypartId in ['breakfast', 'lunch', 'afternoon', 'early-dinner', 'late-dinner']
+        && request.resource.data.menu in ['breakfast', 'lunch']
+        && request.resource.data.reason in ['dropped', 'raw', 'overcooked', 'contaminated', 'quality', 'other']
+        && request.resource.data.reasonDetail is string
+        && request.resource.data.reasonDetail.size() <= 120;
+    }
+
     function validSosEntry(storeId) {
       return request.resource.data.keys().hasOnly([
           'storeId', 'dayKey', 'daypartId', 'hourStart', 'averageSeconds', 'loggedAt',
@@ -108,6 +135,14 @@ service cloud.firestore {
       match /wasteEvents/{eventId} {
         allow read: if belongsToStore(storeId);
         allow create: if belongsToStore(storeId) && validWasteEvent(storeId);
+        allow update: if false;
+        allow delete: if belongsToStore(storeId)
+          && resource.data.createdBy == request.auth.uid;
+      }
+
+      match /discardEvents/{eventId} {
+        allow read: if belongsToStore(storeId);
+        allow create: if belongsToStore(storeId) && validDiscardEvent(storeId);
         allow update: if false;
         allow delete: if belongsToStore(storeId)
           && resource.data.createdBy == request.auth.uid;

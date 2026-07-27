@@ -7,9 +7,13 @@ members/{uid}
 stores/{storeId}
   name
   settings/app
-    products[], dayparts[], donationItems[], warningCooldownSeconds
+    products[], dayparts[], donationItems[], warningCooldownSeconds,
+    sosEnabled, discardTrackingEnabled
   wasteEvents/{autoId}
     cool down product, quantity, cost snapshot, local day/daypart, device, creator, timestamp
+  discardEvents/{autoId}
+    direct-to-trash product, quantity, cost snapshot, reason/detail,
+    local day/daypart, device, creator, timestamp
   sosEntries/{YYYY-MM-DD_HH}
     one overwriteable hourly average
   donationRecords/{YYYY-MM-DD}
@@ -21,7 +25,9 @@ stores/{storeId}
 
 Cool Down taps are separate immutable documents so simultaneous writes from different devices cannot overwrite each other. They remain stored under the legacy `wasteEvents` collection name for compatibility. The recent-activity UI merges documents by product and minute.
 
-SOS document IDs are deterministic by date and hour. Re-entering the hour updates the same record.
+Discard taps use their own immutable collection and never start a cooldown pan, count against a Cool Down target, contribute to donation predictions, or appear in Cool Down exports. Recent activity merges them by product, reason, detail, and minute.
+
+SOS document IDs are deterministic by date and daypart. Re-entering a daypart updates the same record. Older hourly records remain readable.
 
 Donation document IDs are deterministic by count date. Resubmitting replaces the same final document and increments its revision; it does not create duplicate final counts.
 
@@ -30,3 +36,5 @@ Every read and write is scoped through the signed-in user’s `members/{uid}.sto
 Cooldown pan quantities accumulate by product while a pan is active and reset when that pan is completed or canceled.
 
 Test Daypart entries exist only in the current browser session. They do not create cool down events, update cooldown timers, affect donations, or appear in exports.
+
+The SOS and Discard tabs can be shown or hidden for all devices from Admin. Existing data is retained when a tab is hidden. SOS defaults to shown for existing settings documents; Discard defaults to hidden until explicitly enabled.

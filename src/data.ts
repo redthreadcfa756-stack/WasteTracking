@@ -28,7 +28,7 @@ import {
 } from 'firebase/firestore';
 import { auth, db } from './firebase';
 import { adjustCooldownProductQuantities } from './domain';
-import type { AppSettings, CooldownPanId, CooldownTimer, DonationRecord, MemberProfile, SosEntry, WasteEvent } from './types';
+import type { AppSettings, CooldownPanId, CooldownTimer, DiscardEvent, DonationRecord, MemberProfile, SosEntry, WasteEvent } from './types';
 
 function requireFirebase() {
   if (!auth || !db) throw new Error('Firebase environment variables are missing.');
@@ -240,6 +240,37 @@ export async function loadDemoWasteForDateRange(storeId: string, startDayKey: st
 export async function removeWasteEvents(storeId: string, eventIds: string[]): Promise<void> {
   const services = requireFirebase();
   await Promise.all(eventIds.map((eventId) => deleteDoc(doc(services.db, 'stores', storeId, 'wasteEvents', eventId))));
+}
+
+export function subscribeDiscardForDay(
+  storeId: string,
+  selectedDayKey: string,
+  callback: (events: DiscardEvent[]) => void,
+  onError: (error: FirestoreError) => void,
+): Unsubscribe {
+  const services = requireFirebase();
+  const eventsQuery = query(
+    collection(services.db, 'stores', storeId, 'discardEvents'),
+    where('dayKey', '==', selectedDayKey),
+    orderBy('eventAt', 'desc'),
+  );
+  return onSnapshot(eventsQuery, { includeMetadataChanges: true }, (snapshot) => {
+    callback(snapshot.docs.map((eventDoc) => ({ id: eventDoc.id, ...eventDoc.data() } as DiscardEvent)));
+  }, onError);
+}
+
+export async function createDiscardEvent(event: Omit<DiscardEvent, 'id' | 'eventAt'>): Promise<string> {
+  const services = requireFirebase();
+  const eventDoc = await addDoc(collection(services.db, 'stores', event.storeId, 'discardEvents'), {
+    ...event,
+    eventAt: serverTimestamp(),
+  });
+  return eventDoc.id;
+}
+
+export async function removeDiscardEvents(storeId: string, eventIds: string[]): Promise<void> {
+  const services = requireFirebase();
+  await Promise.all(eventIds.map((eventId) => deleteDoc(doc(services.db, 'stores', storeId, 'discardEvents', eventId))));
 }
 
 export function subscribeSosForDay(

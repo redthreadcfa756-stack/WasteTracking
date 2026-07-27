@@ -9,6 +9,14 @@
       ]
     },
     {
+      "collectionGroup": "discardEvents",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "dayKey", "order": "ASCENDING" },
+        { "fieldPath": "eventAt", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "sosEntries",
       "queryScope": "COLLECTION",
       "fields": [

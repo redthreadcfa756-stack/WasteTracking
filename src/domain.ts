@@ -6,7 +6,9 @@ import type {
   DonationItemConfig,
   DonationRecord,
   MergedActivity,
+  MergedDiscardActivity,
   ProductConfig,
+  DiscardEvent,
   WasteEvent,
 } from './types';
 
@@ -151,6 +153,45 @@ export function mergeActivity(events: WasteEvent[], products: ProductConfig[]): 
         occurredAt: date,
         deviceNames: [event.deviceName],
         sourceEventIds: [event.id],
+      });
+    });
+
+  return [...groups.values()].sort((a, b) => b.occurredAt.getTime() - a.occurredAt.getTime());
+}
+
+export function mergeDiscardActivity(events: DiscardEvent[], products: ProductConfig[]): MergedDiscardActivity[] {
+  const productMap = new Map(products.map((product) => [product.id, product]));
+  const groups = new Map<string, MergedDiscardActivity>();
+
+  [...events]
+    .sort((a, b) => eventDate(b.eventAt).getTime() - eventDate(a.eventAt).getTime())
+    .forEach((event) => {
+      const date = new Date(eventDate(event.eventAt));
+      date.setSeconds(0, 0);
+      const key = `${event.productId}-${event.reason}-${event.reasonDetail}-${date.getTime()}`;
+      const current = groups.get(key);
+      if (current) {
+        current.equivalentUnits += event.equivalentUnits;
+        current.displayQuantity += event.displayQuantity;
+        current.cost += eventCost(event);
+        current.sourceEventIds.push(event.id);
+        if (!current.deviceNames.includes(event.deviceName)) current.deviceNames.push(event.deviceName);
+        return;
+      }
+      const product = productMap.get(event.productId);
+      groups.set(key, {
+        key,
+        productId: event.productId,
+        productName: product?.name || event.productName,
+        equivalentUnits: event.equivalentUnits,
+        displayQuantity: event.displayQuantity,
+        displayUnit: event.displayUnit,
+        cost: eventCost(event),
+        occurredAt: date,
+        deviceNames: [event.deviceName],
+        sourceEventIds: [event.id],
+        reason: event.reason,
+        reasonDetail: event.reasonDetail,
       });
     });
 

@@ -72,6 +72,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   version: 1,
   warningCooldownSeconds: 90,
   cooldownTimersEnabled: false,
+  sosEnabled: true,
+  discardTrackingEnabled: false,
   products: DEFAULT_PRODUCTS,
   dayparts: DEFAULT_DAYPARTS,
   donationItems: DEFAULT_DONATION_ITEMS,

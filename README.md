@@ -1,6 +1,6 @@
 # Cool Down + SOS Tracker
 
-An iOS-first installable web app with live multi-device cool down tracking, hourly SOS entries, Shared Table reconciliation, and protected admin settings.
+An iOS-first installable web app with live multi-device cool down tracking, optional reason-coded direct-discard tracking, daypart SOS entries, Shared Table reconciliation, and protected admin settings.
 
 ## Architecture
 
@@ -55,6 +55,8 @@ Change `VITE_ADMIN_PASSWORD` to the desired store password before building. The 
 Open the app, enter the configured password in Admin, and press **Save all changes** once. This creates `stores/00756/settings/app` from the built-in defaults.
 
 Then open the app in two browser windows. A cool down tap in one should appear in the other through the Firestore realtime listener.
+
+Admin can show or hide the SOS and Discard tabs for all devices. Deploy the included Firestore rules and indexes before enabling Discard so its isolated `discardEvents` collection can sync.
 
 ## 5. Create the Cloudflare Pages project
 

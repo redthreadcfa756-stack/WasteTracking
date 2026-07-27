@@ -5,6 +5,7 @@ export type DaypartId = 'breakfast' | 'lunch' | 'afternoon' | 'early-dinner' | '
 export type DonationUnit = 'lb' | 'each';
 export type MemberRole = 'employee' | 'admin';
 export type CooldownPanId = 'pan-1' | 'pan-2' | 'pan-3' | 'pan-4';
+export type DiscardReason = 'dropped' | 'raw' | 'overcooked' | 'contaminated' | 'quality' | 'other';
 
 export interface ProductConfig {
   id: string;
@@ -39,6 +40,8 @@ export interface AppSettings {
   version: number;
   warningCooldownSeconds: number;
   cooldownTimersEnabled: boolean;
+  sosEnabled: boolean;
+  discardTrackingEnabled: boolean;
   products: ProductConfig[];
   dayparts: DaypartConfig[];
   donationItems: DonationItemConfig[];
@@ -84,6 +87,11 @@ export interface WasteEvent {
   createdByName: string;
 }
 
+export interface DiscardEvent extends WasteEvent {
+  reason: DiscardReason;
+  reasonDetail: string;
+}
+
 export interface SosEntry {
   id: string;
   storeId: string;
@@ -122,4 +130,9 @@ export interface MergedActivity {
   occurredAt: Date;
   deviceNames: string[];
   sourceEventIds: string[];
+}
+
+export interface MergedDiscardActivity extends MergedActivity {
+  reason: DiscardReason;
+  reasonDetail: string;
 }

@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { User } from 'firebase/auth';
-import { observeAuth, subscribeCooldownTimers, subscribeDonationRecord, subscribeSettings, subscribeSosForDay, subscribeWasteForDay } from './data';
+import { observeAuth, subscribeCooldownTimers, subscribeDiscardForDay, subscribeDonationRecord, subscribeSettings, subscribeSosForDay, subscribeWasteForDay } from './data';
 import { DEFAULT_DONATION_ITEMS, PRODUCT_TONES } from './defaults';
 import { dayKey, previousDayKey } from './domain';
-import type { AppSettings, CooldownTimer, DonationRecord, MemberProfile, SosEntry, WasteEvent } from './types';
+import type { AppSettings, CooldownTimer, DiscardEvent, DonationRecord, MemberProfile, SosEntry, WasteEvent } from './types';
 
 export function useAuthUser() {
   const [user, setUser] = useState<User | null>(null);
@@ -80,6 +80,7 @@ export function useStoreData(storeId: string | undefined, now: Date) {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [todayWaste, setTodayWaste] = useState<WasteEvent[]>([]);
   const [previousWaste, setPreviousWaste] = useState<WasteEvent[]>([]);
+  const [discardEvents, setDiscardEvents] = useState<DiscardEvent[]>([]);
   const [sosEntries, setSosEntries] = useState<SosEntry[]>([]);
   const [donationRecord, setDonationRecord] = useState<DonationRecord | null>(null);
   const [cooldownTimers, setCooldownTimers] = useState<CooldownTimer[]>([]);
@@ -99,6 +100,8 @@ export function useStoreData(storeId: string | undefined, now: Date) {
         setSettings(value ? {
           ...value,
           cooldownTimersEnabled: value.cooldownTimersEnabled ?? false,
+          sosEnabled: value.sosEnabled ?? true,
+          discardTrackingEnabled: value.discardTrackingEnabled ?? false,
           products: value.products.map((product) => {
             const normalized = product.id === 'nuggets'
               ? { ...product, menus: ['breakfast', 'lunch'] as typeof product.menus }
@@ -122,5 +125,16 @@ export function useStoreData(storeId: string | undefined, now: Date) {
     return () => subscriptions.forEach((unsubscribe) => unsubscribe());
   }, [storeId, today, previous]);
 
-  return { settings, todayWaste, previousWaste, sosEntries, donationRecord, cooldownTimers, error, ready, today };
+  useEffect(() => {
+    if (!storeId || !settings?.discardTrackingEnabled) {
+      setDiscardEvents([]);
+      return;
+    }
+    return subscribeDiscardForDay(storeId, today, setDiscardEvents, (caught) => {
+      setError(caught.message);
+      setReady(true);
+    });
+  }, [storeId, today, settings?.discardTrackingEnabled]);
+
+  return { settings, todayWaste, previousWaste, discardEvents, sosEntries, donationRecord, cooldownTimers, error, ready, today };
 }

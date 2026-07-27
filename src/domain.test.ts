@@ -1,13 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS, PRODUCT_TONES } from './defaults';
-import { adjustCooldownProductQuantities, buildDonationCsv, buildWasteCsv, cooldownProductQuantity, detectDaypart, distributeDollarTarget, donationPrediction, formatDurationInput, mergeActivity, parseDuration } from './domain';
-import type { CooldownTimer, DonationItemConfig, DonationRecord, WasteEvent } from './types';
+import { adjustCooldownProductQuantities, buildDonationCsv, buildWasteCsv, cooldownProductQuantity, detectDaypart, distributeDollarTarget, donationPrediction, formatDurationInput, mergeActivity, mergeDiscardActivity, parseDuration } from './domain';
+import type { CooldownTimer, DiscardEvent, DonationItemConfig, DonationRecord, WasteEvent } from './types';
 
 const event = (overrides: Partial<WasteEvent>): WasteEvent => ({
   id: 'event', storeId: 'store', productId: 'filets', productName: 'Filets', equivalentUnits: 1,
   displayQuantity: 1, displayUnit: 'each', unitCostSnapshot: 2, eventAt: new Date('2026-07-23T09:26:15'),
   dayKey: '2026-07-23', daypartId: 'breakfast', menu: 'breakfast', deviceName: 'iPhone',
   createdBy: 'uid', createdByName: 'CL', ...overrides,
+});
+
+const discardEvent = (overrides: Partial<DiscardEvent>): DiscardEvent => ({
+  ...event(overrides),
+  reason: 'dropped',
+  reasonDetail: '',
+  ...overrides,
 });
 
 describe('domain rules', () => {
@@ -39,6 +46,21 @@ describe('domain rules', () => {
     ], DEFAULT_SETTINGS.products);
     expect(merged).toHaveLength(1);
     expect(merged[0].displayQuantity).toBe(2);
+  });
+
+  it('keeps discard reasons separate while merging rapid taps', () => {
+    const merged = mergeDiscardActivity([
+      discardEvent({ id: 'a', equivalentUnits: 1, displayQuantity: 1 }),
+      discardEvent({ id: 'b', equivalentUnits: 1, displayQuantity: 1, eventAt: new Date('2026-07-23T09:26:45') }),
+      discardEvent({ id: 'c', reason: 'raw', eventAt: new Date('2026-07-23T09:26:50') }),
+    ], DEFAULT_SETTINGS.products);
+    expect(merged).toHaveLength(2);
+    expect(merged.find((entry) => entry.reason === 'dropped')?.displayQuantity).toBe(2);
+  });
+
+  it('defaults SOS on and direct discard tracking off', () => {
+    expect(DEFAULT_SETTINGS.sosEnabled).toBe(true);
+    expect(DEFAULT_SETTINGS.discardTrackingEnabled).toBe(false);
   });
 
   it('tracks and displays product quantities only for an active cooldown pan', () => {
