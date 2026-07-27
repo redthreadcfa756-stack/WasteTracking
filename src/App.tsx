@@ -105,34 +105,83 @@ function timestampMillis(value: CooldownTimer['expiresAt']): number {
   return value.toMillis();
 }
 
-let cooldownAudioContext: AudioContext | null = null;
+let cooldownAlarmAudio: HTMLAudioElement | null = null;
+let cooldownAlarmPrime: Promise<void> | null = null;
 
-function getCooldownAudioContext(): AudioContext | null {
-  if (cooldownAudioContext) return cooldownAudioContext;
-  const AudioContextClass = window.AudioContext
-    || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-  if (!AudioContextClass) return null;
-  cooldownAudioContext = new AudioContextClass();
-  return cooldownAudioContext;
+function createCooldownAlarmUrl(): string {
+  const sampleRate = 16_000;
+  const durationSeconds = 0.96;
+  const sampleCount = Math.ceil(sampleRate * durationSeconds);
+  const dataLength = sampleCount * 2;
+  const buffer = new ArrayBuffer(44 + dataLength);
+  const view = new DataView(buffer);
+  const writeText = (offset: number, value: string) => {
+    [...value].forEach((character, index) => view.setUint8(offset + index, character.charCodeAt(0)));
+  };
+
+  writeText(0, 'RIFF');
+  view.setUint32(4, 36 + dataLength, true);
+  writeText(8, 'WAVE');
+  writeText(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeText(36, 'data');
+  view.setUint32(40, dataLength, true);
+
+  for (let index = 0; index < sampleCount; index += 1) {
+    const time = index / sampleRate;
+    const beepIndex = Math.floor(time / 0.32);
+    const beepTime = time - beepIndex * 0.32;
+    let sample = 0;
+    if (beepIndex < 3 && beepTime < 0.24) {
+      const attack = Math.min(1, beepTime / 0.012);
+      const release = Math.min(1, (0.24 - beepTime) / 0.035);
+      const envelope = Math.max(0, Math.min(attack, release));
+      const fundamental = Math.sin(2 * Math.PI * 880 * time);
+      const harmonic = Math.sin(2 * Math.PI * 1760 * time);
+      sample = envelope * (fundamental * 0.72 + harmonic * 0.28) * 0.72;
+    }
+    view.setInt16(44 + index * 2, Math.round(Math.max(-1, Math.min(1, sample)) * 32_767), true);
+  }
+
+  return URL.createObjectURL(new Blob([buffer], { type: 'audio/wav' }));
+}
+
+function getCooldownAlarmAudio(): HTMLAudioElement {
+  if (cooldownAlarmAudio) return cooldownAlarmAudio;
+  cooldownAlarmAudio = new Audio(createCooldownAlarmUrl());
+  cooldownAlarmAudio.preload = 'auto';
+  return cooldownAlarmAudio;
+}
+
+function primeCooldownAlarm() {
+  if (cooldownAlarmPrime) return;
+  const audio = getCooldownAlarmAudio();
+  audio.volume = 0;
+  cooldownAlarmPrime = audio.play()
+    .then(() => {
+      audio.pause();
+      audio.currentTime = 0;
+    })
+    .catch(() => undefined)
+    .finally(() => {
+      audio.volume = 1;
+    });
 }
 
 async function playCooldownAlarm(): Promise<boolean> {
   try {
-    const context = getCooldownAudioContext();
-    if (!context) return false;
-    if (context.state === 'suspended') await context.resume();
-    [0, 0.32, 0.64].forEach((delay) => {
-      const oscillator = context.createOscillator();
-      const gain = context.createGain();
-      oscillator.frequency.value = 880;
-      gain.gain.setValueAtTime(0.0001, context.currentTime + delay);
-      gain.gain.exponentialRampToValueAtTime(0.35, context.currentTime + delay + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + delay + 0.24);
-      oscillator.connect(gain);
-      gain.connect(context.destination);
-      oscillator.start(context.currentTime + delay);
-      oscillator.stop(context.currentTime + delay + 0.25);
-    });
+    if (cooldownAlarmPrime) await cooldownAlarmPrime;
+    const audio = getCooldownAlarmAudio();
+    audio.pause();
+    audio.currentTime = 0;
+    audio.volume = 1;
+    await audio.play();
     return true;
   } catch {
     // The synchronized popup still appears when a browser blocks automatic audio.
@@ -339,10 +388,7 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
   }, [activeTab, settings.sosEnabled, settings.discardTrackingEnabled]);
 
   useEffect(() => {
-    const primeAudio = () => {
-      const context = getCooldownAudioContext();
-      if (context?.state === 'suspended') void context.resume();
-    };
+    const primeAudio = () => primeCooldownAlarm();
     window.addEventListener('pointerdown', primeAudio, { once: true });
     return () => window.removeEventListener('pointerdown', primeAudio);
   }, []);
@@ -1699,7 +1745,7 @@ function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDay
             className="secondary-button"
             onClick={() => {
               void playCooldownAlarm().then((played) => {
-                notify(played ? 'Test alarm played on this device.' : 'This browser could not start alarm audio.');
+                notify(played ? 'Alarm playback started on this device.' : 'This browser blocked alarm playback.');
               });
             }}
           >
