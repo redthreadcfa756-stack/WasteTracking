@@ -116,11 +116,11 @@ function getCooldownAudioContext(): AudioContext | null {
   return cooldownAudioContext;
 }
 
-function playCooldownAlarm() {
+async function playCooldownAlarm(): Promise<boolean> {
   try {
     const context = getCooldownAudioContext();
-    if (!context) return;
-    if (context.state === 'suspended') void context.resume();
+    if (!context) return false;
+    if (context.state === 'suspended') await context.resume();
     [0, 0.32, 0.64].forEach((delay) => {
       const oscillator = context.createOscillator();
       const gain = context.createGain();
@@ -133,8 +133,10 @@ function playCooldownAlarm() {
       oscillator.start(context.currentTime + delay);
       oscillator.stop(context.currentTime + delay + 0.25);
     });
+    return true;
   } catch {
     // The synchronized popup still appears when a browser blocks automatic audio.
+    return false;
   }
 }
 
@@ -355,7 +357,7 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
     const key = `${expiredTimer.id}:${timestampMillis(expiredTimer.expiresAt)}`;
     if (alertedTimers.current.has(key)) return;
     alertedTimers.current.add(key);
-    playCooldownAlarm();
+    void playCooldownAlarm();
   }, [expiredTimer]);
 
   const notify = (message: string) => {
@@ -1687,6 +1689,23 @@ function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDay
             <small>This device only · Test entries are never saved</small>
           </span>
         </label>
+        <div className="alarm-test-control">
+          <span className="toggle-copy">
+            <strong>Cooldown alarm</strong>
+            <small>This device only · Uses its current volume</small>
+          </span>
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => {
+              void playCooldownAlarm().then((played) => {
+                notify(played ? 'Test alarm played on this device.' : 'This browser could not start alarm audio.');
+              });
+            }}
+          >
+            <Timer aria-hidden="true" /> Test alarm
+          </button>
+        </div>
       </div>
       <details className="admin-dropdown">
         <summary>Donations · Product unit costs and weights</summary>

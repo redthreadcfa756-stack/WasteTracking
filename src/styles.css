@@ -376,6 +376,18 @@ code { font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.9em; }
   color: var(--muted);
   font-size: 0.72rem;
 }
+.alarm-test-control {
+  display: grid;
+  align-self: stretch;
+  gap: 0.55rem;
+  padding: 0.7rem;
+  background: var(--soft);
+}
+.alarm-test-control .secondary-button {
+  width: 100%;
+  border-color: var(--line);
+  background: var(--panel);
+}
 .full-row { grid-column: 1 / -1; }
 
 .data-table-wrap {
