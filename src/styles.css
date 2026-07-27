@@ -498,6 +498,7 @@ code { font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.9em; }
 .modal-heading h2 svg { color: var(--red); width: 22px; }
 .modal > p, .modal-form p { color: var(--muted); line-height: 1.5; }
 .modal-form { display: grid; gap: 1rem; }
+.cooldown-expired-actions { display: grid; gap: 0.65rem; }
 .number-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.5rem; }
 .number-grid button { border: 1px solid var(--line); background: var(--soft); font-weight: 750; }
 

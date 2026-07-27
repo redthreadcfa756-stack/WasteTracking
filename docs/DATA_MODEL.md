@@ -32,7 +32,7 @@ Donation document IDs are deterministic by count date. Resubmitting replaces the
 
 Every read and write is scoped through the signed-in user’s `members/{uid}.storeId`. Only a member whose role is `admin` may update shared settings. Admin-panel entry also reauthenticates the current Firebase password every time the tab is entered.
 
-Cooldown pan quantities accumulate by product while a pan is active and reset when that pan is completed or canceled.
+Cooldown pan quantities accumulate by product while a pan is active and reset when that pan is completed or canceled. Snoozing updates the shared expiry to one minute from the action so every connected device re-arms against the same time.
 
 Test Daypart entries exist only in the current browser session. They do not create cool down events, update cooldown timers, affect donations, or appear in exports.
 

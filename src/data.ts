@@ -212,6 +212,26 @@ export async function resetCooldownTimer(storeId: string, panId: CooldownPanId):
   }, { merge: true });
 }
 
+export async function snoozeCooldownTimer(
+  storeId: string,
+  panId: CooldownPanId,
+  durationMs = 60_000,
+): Promise<void> {
+  const services = requireFirebase();
+  const timerRef = doc(services.db, 'stores', storeId, 'cooldownTimers', panId);
+  await runTransaction(services.db, async (transaction) => {
+    const snapshot = await transaction.get(timerRef);
+    if (!snapshot.exists()) return;
+
+    const timer = snapshot.data() as CooldownTimer;
+    if (!timer.active) return;
+
+    transaction.update(timerRef, {
+      expiresAt: Timestamp.fromMillis(Date.now() + durationMs),
+    });
+  });
+}
+
 export async function resetAllCooldownTimers(storeId: string): Promise<void> {
   await Promise.all((['pan-1', 'pan-2', 'pan-3', 'pan-4'] as CooldownPanId[])
     .map((panId) => resetCooldownTimer(storeId, panId)));

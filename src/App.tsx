@@ -44,6 +44,7 @@ import {
   saveSettings,
   saveSosEntry,
   seedExportDemoData,
+  snoozeCooldownTimer,
   startOrJoinCooldownTimer,
 } from './data';
 import { DEFAULT_SETTINGS } from './defaults';
@@ -115,7 +116,8 @@ function timestampMillis(value: CooldownTimer['expiresAt']): number {
 }
 
 let cooldownAlarmAudio: HTMLAudioElement | null = null;
-let cooldownAlarmPrime: Promise<void> | null = null;
+let cooldownAlarmPrimed = false;
+let cooldownAlarmPrime: Promise<boolean> | null = null;
 
 function createCooldownAlarmUrl(): string {
   const sampleRate = 16_000;
@@ -168,29 +170,54 @@ function getCooldownAlarmAudio(): HTMLAudioElement {
   return cooldownAlarmAudio;
 }
 
-function primeCooldownAlarm() {
-  if (cooldownAlarmPrime) return;
+function primeCooldownAlarm(): Promise<boolean> {
+  if (cooldownAlarmPrimed) return Promise.resolve(true);
+  if (cooldownAlarmIsPlaying()) {
+    cooldownAlarmPrimed = true;
+    return Promise.resolve(true);
+  }
+  if (cooldownAlarmPrime) return cooldownAlarmPrime;
+
   const audio = getCooldownAlarmAudio();
-  audio.volume = 0;
+  const previousVolume = audio.volume;
+  audio.loop = false;
+  audio.volume = 0.001;
   cooldownAlarmPrime = audio.play()
     .then(() => {
       audio.pause();
       audio.currentTime = 0;
+      cooldownAlarmPrimed = true;
+      return true;
     })
-    .catch(() => undefined)
+    .catch(() => false)
     .finally(() => {
-      audio.volume = 1;
+      audio.volume = previousVolume || 1;
+      cooldownAlarmPrime = null;
     });
+  return cooldownAlarmPrime;
 }
 
-async function playCooldownAlarm(): Promise<boolean> {
+function stopCooldownAlarm() {
+  if (!cooldownAlarmAudio) return;
+  cooldownAlarmAudio.loop = false;
+  cooldownAlarmAudio.pause();
+  cooldownAlarmAudio.currentTime = 0;
+}
+
+function cooldownAlarmIsPlaying() {
+  return Boolean(cooldownAlarmAudio && !cooldownAlarmAudio.paused && !cooldownAlarmAudio.ended);
+}
+
+async function playCooldownAlarm({ loop = false }: { loop?: boolean } = {}): Promise<boolean> {
   try {
     if (cooldownAlarmPrime) await cooldownAlarmPrime;
     const audio = getCooldownAlarmAudio();
     audio.pause();
     audio.currentTime = 0;
     audio.volume = 1;
+    audio.loop = loop;
     await audio.play();
+    cooldownAlarmPrimed = true;
     return true;
   } catch {
     // The synchronized popup still appears when a browser blocks automatic audio.
@@ -372,15 +399,29 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
   const [warningMutedUntil, setWarningMutedUntil] = useState(0);
   const [toast, setToast] = useState('');
   const [timerNow, setTimerNow] = useState(Date.now());
-  const alertedTimers = useRef(new Set<string>());
+  const [timerActionBusy, setTimerActionBusy] = useState(false);
+  const [alarmPlaybackBlocked, setAlarmPlaybackBlocked] = useState(false);
+  const alarmActionInProgress = useRef(false);
   const visibleTabs = TABS.filter((tab) => (
     (tab.id !== 'sos' || settings.sosEnabled)
     && (tab.id !== 'discard' || settings.discardTrackingEnabled)
   ));
 
   useEffect(() => {
-    const interval = window.setInterval(() => setTimerNow(Date.now()), 1_000);
-    return () => window.clearInterval(interval);
+    const syncClock = () => setTimerNow(Date.now());
+    const syncVisibleClock = () => {
+      if (document.visibilityState === 'visible') syncClock();
+    };
+    const interval = window.setInterval(syncClock, 1_000);
+    window.addEventListener('focus', syncClock);
+    window.addEventListener('pageshow', syncClock);
+    document.addEventListener('visibilitychange', syncVisibleClock);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', syncClock);
+      window.removeEventListener('pageshow', syncClock);
+      document.removeEventListener('visibilitychange', syncVisibleClock);
+    };
   }, []);
 
   useEffect(() => {
@@ -397,23 +438,67 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
   }, [activeTab, settings.sosEnabled, settings.discardTrackingEnabled]);
 
   useEffect(() => {
-    const primeAudio = () => primeCooldownAlarm();
-    window.addEventListener('pointerdown', primeAudio, { once: true });
-    return () => window.removeEventListener('pointerdown', primeAudio);
+    const primeAudio = () => void primeCooldownAlarm();
+    window.addEventListener('pointerdown', primeAudio);
+    window.addEventListener('keydown', primeAudio);
+    return () => {
+      window.removeEventListener('pointerdown', primeAudio);
+      window.removeEventListener('keydown', primeAudio);
+    };
   }, []);
 
   const testDaypartActive = testDaypartEnabled && activeTab === 'waste';
   const expiredTimer = settings.cooldownTimersEnabled && !testDaypartActive
     ? storeData.cooldownTimers.find((timer) => timer.active && timestampMillis(timer.expiresAt) <= timerNow)
     : undefined;
+  const expiredTimerKey = expiredTimer
+    ? `${expiredTimer.id}:${timestampMillis(expiredTimer.expiresAt)}`
+    : '';
 
   useEffect(() => {
-    if (!expiredTimer) return;
-    const key = `${expiredTimer.id}:${timestampMillis(expiredTimer.expiresAt)}`;
-    if (alertedTimers.current.has(key)) return;
-    alertedTimers.current.add(key);
-    void playCooldownAlarm();
-  }, [expiredTimer]);
+    if (!expiredTimerKey) {
+      alarmActionInProgress.current = false;
+      stopCooldownAlarm();
+      setAlarmPlaybackBlocked(false);
+      return;
+    }
+
+    alarmActionInProgress.current = false;
+    navigator.vibrate?.([300, 150, 300, 150, 600]);
+    let disposed = false;
+    let attemptInFlight = false;
+    const attemptAlarm = async () => {
+      if (
+        disposed
+        || attemptInFlight
+        || alarmActionInProgress.current
+        || (cooldownAlarmAudio?.loop && cooldownAlarmIsPlaying())
+      ) return;
+      attemptInFlight = true;
+      if (cooldownAlarmPrime) await cooldownAlarmPrime;
+      if (disposed) return;
+      const played = await playCooldownAlarm({ loop: true });
+      attemptInFlight = false;
+      if (!disposed) setAlarmPlaybackBlocked(!played);
+    };
+    const retryOnVisible = () => {
+      if (document.visibilityState === 'visible') void attemptAlarm();
+    };
+
+    void attemptAlarm();
+    window.addEventListener('pointerdown', attemptAlarm);
+    window.addEventListener('focus', attemptAlarm);
+    window.addEventListener('pageshow', attemptAlarm);
+    document.addEventListener('visibilitychange', retryOnVisible);
+    return () => {
+      disposed = true;
+      window.removeEventListener('pointerdown', attemptAlarm);
+      window.removeEventListener('focus', attemptAlarm);
+      window.removeEventListener('pageshow', attemptAlarm);
+      document.removeEventListener('visibilitychange', retryOnVisible);
+      stopCooldownAlarm();
+    };
+  }, [expiredTimerKey]);
 
   const notify = (message: string) => {
     setToast(message);
@@ -421,11 +506,18 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
   };
 
   const completeCooldownTimer = async (timer: CooldownTimer) => {
+    alarmActionInProgress.current = true;
+    stopCooldownAlarm();
+    setTimerActionBusy(true);
     try {
       await resetCooldownTimer(member.storeId, timer.id);
       notify(`${timer.panLabel} reset and ready for the next cool down entry.`);
     } catch (caught) {
+      alarmActionInProgress.current = false;
       notify(errorMessage(caught));
+      void playCooldownAlarm({ loop: true });
+    } finally {
+      setTimerActionBusy(false);
     }
   };
 
@@ -435,6 +527,23 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
       notify(`${timer.panLabel} timer canceled.`);
     } catch (caught) {
       notify(errorMessage(caught));
+    }
+  };
+
+  const snoozeExpiredCooldownTimer = async (timer: CooldownTimer) => {
+    alarmActionInProgress.current = true;
+    stopCooldownAlarm();
+    setTimerActionBusy(true);
+    try {
+      await snoozeCooldownTimer(member.storeId, timer.id);
+      setTimerNow(Date.now());
+      notify(`${timer.panLabel} snoozed for 1 minute on every device.`);
+    } catch (caught) {
+      alarmActionInProgress.current = false;
+      notify(errorMessage(caught));
+      void playCooldownAlarm({ loop: true });
+    } finally {
+      setTimerActionBusy(false);
     }
   };
 
@@ -604,12 +713,44 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
         <Modal
           title={`${expiredTimer.panLabel} cooldown complete`}
           icon={<Timer />}
-          onClose={() => void completeCooldownTimer(expiredTimer)}
+          onClose={() => {
+            if (!timerActionBusy) void completeCooldownTimer(expiredTimer);
+          }}
         >
           <p>Wrap the pan and place it in the walk-in cooler.</p>
-          <button className="primary-button" onClick={() => void completeCooldownTimer(expiredTimer)}>
-            <Check /> Pan wrapped and moved
-          </button>
+          {alarmPlaybackBlocked && (
+            <p className="form-error" role="alert">
+              This browser blocked automatic sound. Tap Play alarm to enable it.
+            </p>
+          )}
+          <div className="cooldown-expired-actions">
+            <button
+              className="secondary-button"
+              disabled={timerActionBusy}
+              onClick={() => {
+                alarmActionInProgress.current = false;
+                void playCooldownAlarm({ loop: true }).then((played) => {
+                  setAlarmPlaybackBlocked(!played);
+                });
+              }}
+            >
+              <Timer aria-hidden="true" /> {alarmPlaybackBlocked ? 'Play alarm' : 'Replay alarm'}
+            </button>
+            <button
+              className="secondary-button"
+              disabled={timerActionBusy}
+              onClick={() => void snoozeExpiredCooldownTimer(expiredTimer)}
+            >
+              <Clock3 aria-hidden="true" /> Snooze 1 minute
+            </button>
+            <button
+              className="primary-button"
+              disabled={timerActionBusy}
+              onClick={() => void completeCooldownTimer(expiredTimer)}
+            >
+              <Check /> {timerActionBusy ? 'Saving…' : 'Pan wrapped and moved'}
+            </button>
+          </div>
         </Modal>
       )}
       {toast && <div className="toast" role="status">{toast}</div>}
