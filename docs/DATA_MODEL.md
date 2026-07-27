@@ -9,7 +9,7 @@ stores/{storeId}
   settings/app
     products[], dayparts[], donationItems[], warningCooldownSeconds
   wasteEvents/{autoId}
-    product, quantity, cost snapshot, local day/daypart, device, creator, timestamp
+    cool down product, quantity, cost snapshot, local day/daypart, device, creator, timestamp
   sosEntries/{YYYY-MM-DD_HH}
     one overwriteable hourly average
   donationRecords/{YYYY-MM-DD}
@@ -19,7 +19,7 @@ stores/{storeId}
     productQuantities{productId: equivalentUnits}
 ```
 
-Waste taps are separate immutable documents so simultaneous writes from different devices cannot overwrite each other. The recent-activity UI merges documents by product and minute.
+Cool Down taps are separate immutable documents so simultaneous writes from different devices cannot overwrite each other. They remain stored under the legacy `wasteEvents` collection name for compatibility. The recent-activity UI merges documents by product and minute.
 
 SOS document IDs are deterministic by date and hour. Re-entering the hour updates the same record.
 
@@ -29,4 +29,4 @@ Every read and write is scoped through the signed-in user’s `members/{uid}.sto
 
 Cooldown pan quantities accumulate by product while a pan is active and reset when that pan is completed or canceled.
 
-Test Daypart entries exist only in the current browser session. They do not create waste events, update cooldown timers, affect donations, or appear in exports.
+Test Daypart entries exist only in the current browser session. They do not create cool down events, update cooldown timers, affect donations, or appear in exports.

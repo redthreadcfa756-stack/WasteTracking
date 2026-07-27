@@ -11,8 +11,8 @@ import {
   Save,
   Settings,
   ShieldCheck,
+  Snowflake,
   Timer,
-  Trash2,
   X,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
@@ -178,7 +178,7 @@ function CooldownTimerItem({
       className={`cooldown-strip-item ${timer ? 'active' : ''}${holding ? ' is-holding' : ''}`}
       disabled={!timer}
       aria-label={timer ? `${panLabel}, ${formatDuration(remainingSeconds)} remaining. Hold to cancel.` : `${panLabel}, ready`}
-      title={timer ? 'Hold to cancel this timer' : 'Ready for the next waste entry'}
+      title={timer ? 'Hold to cancel this timer' : 'Ready for the next cool down entry'}
       onPointerDown={startHold}
       onPointerUp={cancelHold}
       onPointerCancel={cancelHold}
@@ -196,8 +196,8 @@ function CooldownTimerItem({
   );
 }
 
-const TABS: Array<{ id: TabId; label: string; icon: typeof Trash2 }> = [
-  { id: 'waste', label: 'Waste', icon: Trash2 },
+const TABS: Array<{ id: TabId; label: string; icon: typeof Snowflake }> = [
+  { id: 'waste', label: 'Cool Down', icon: Snowflake },
   { id: 'sos', label: 'SOS', icon: Timer },
   { id: 'donations', label: 'Donations', icon: Gift },
   { id: 'admin', label: 'Admin', icon: Settings },
@@ -261,9 +261,9 @@ function SignIn() {
   return (
     <main className="center-shell">
       <form className="auth-card" onSubmit={submit}>
-        <div className="brand-mark"><Trash2 aria-hidden="true" /></div>
+        <div className="brand-mark"><Snowflake aria-hidden="true" /></div>
         <p className="eyebrow">Shared operations</p>
-        <h1>Waste + SOS</h1>
+        <h1>Cool Down + SOS</h1>
         <p>Sign in once on this device to sync with the store.</p>
         <label>
           Email
@@ -349,7 +349,7 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
   const completeCooldownTimer = async (timer: CooldownTimer) => {
     try {
       await resetCooldownTimer(member.storeId, timer.id);
-      notify(`${timer.panLabel} reset and ready for the next waste entry.`);
+      notify(`${timer.panLabel} reset and ready for the next cool down entry.`);
     } catch (caught) {
       notify(errorMessage(caught));
     }
@@ -387,7 +387,7 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
       <header className="topbar">
         <div>
           <p className="eyebrow">Real-time store operations</p>
-          <h1>Waste + SOS</h1>
+          <h1>Cool Down + SOS</h1>
         </div>
         <div className="header-actions">
           <span className={`sync-pill ${online ? '' : 'offline'}`}>
@@ -494,11 +494,11 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
         />
       )}
       {warning && (
-        <Modal title="Waste is over target" icon={<AlertTriangle />} onClose={() => {
+        <Modal title="Cool Down is over target" icon={<AlertTriangle />} onClose={() => {
           setWarning(null);
           setWarningMutedUntil(Date.now() + settings.warningCooldownSeconds * 1000);
         }}>
-          <p>{warning.daypart} waste is now {formatMoney(warning.total)} against a {formatMoney(warning.target)} target.</p>
+          <p>{warning.daypart} cool down is now {formatMoney(warning.total)} against a {formatMoney(warning.target)} target.</p>
           <button className="primary-button" onClick={() => {
             setWarning(null);
             setWarningMutedUntil(Date.now() + settings.warningCooldownSeconds * 1000);
@@ -622,7 +622,7 @@ function WasteTab({
 
   const subtractWaste = (product: ProductConfig, totalUnits: number) => {
     if (totalUnits <= 0) {
-      notify(`No ${product.name} waste to subtract.`);
+      notify(`No ${product.name} cool down entry to subtract.`);
       return;
     }
     const adjustment = Math.min(product.tapQuantity, totalUnits);
@@ -652,7 +652,7 @@ function WasteTab({
           startIfInactive: false,
         })));
       }
-      notify('Last waste entry removed.');
+      notify('Last cool down entry removed.');
     } catch (caught) {
       notify(errorMessage(caught));
     }
@@ -683,7 +683,7 @@ function WasteTab({
           <p className="eyebrow">
             {testMode ? 'Test Daypart · Local session' : `${daypart.label} · ${formatMinutes(daypart.startMinutes)}–${formatMinutes(daypart.endMinutes)}`}
           </p>
-          <h2>{testMode ? 'Practice waste entry' : 'Tap waste as it happens'}</h2>
+          <h2>{testMode ? 'Practice cool down entry' : 'Log product entering cool down'}</h2>
         </div>
         <label className="compact-control">
           Menu
@@ -697,7 +697,7 @@ function WasteTab({
 
       <div className="stat-grid one">
         <Stat
-          label={`${testMode ? 'Test · ' : ''}${daypart.label} waste / target`}
+          label={`${testMode ? 'Test · ' : ''}${daypart.label} cool down / target`}
           value={`${formatMoney(activeWaste.cost)} / ${formatMoney(daypart.totalDollarTarget)}`}
           detail={`${varianceDetail}${testMode ? ' · Local only' : ''}`}
           tone={targetVariance > 0 ? 'danger' : undefined}
@@ -755,7 +755,7 @@ function WasteTab({
         </button>
       </div>
       <div className="activity-list">
-        {merged.length === 0 && <EmptyState>{testMode ? 'No test waste entered for this menu.' : 'No waste logged for this menu yet.'}</EmptyState>}
+        {merged.length === 0 && <EmptyState>{testMode ? 'No test cool down entered for this menu.' : 'No cool down logged for this menu yet.'}</EmptyState>}
         {merged.slice(0, 12).map((entry) => {
           const product = settings.products.find((candidate) => candidate.id === entry.productId)!;
           return (
@@ -993,7 +993,7 @@ function DonationsTab({ settings, previousWaste, currentWaste, existing, member,
     const parts = [];
     if (previousUnits) parts.push(`${formatQuantity(previousUnits)} prior`);
     if (breakfastUnits) parts.push(`${formatQuantity(breakfastUnits)} today`);
-    return parts.join(' + ') || 'No tracked waste';
+    return parts.join(' + ') || 'No tracked cool down';
   };
 
   const usePredictions = () => {
@@ -1016,9 +1016,9 @@ function DonationsTab({ settings, previousWaste, currentWaste, existing, member,
         {existing && <span className="status-badge"><Check aria-hidden="true" /> Submitted · revision {existing.revision}</span>}
       </div>
       <div className="stat-grid">
-        <Stat label="Predicted tracked lb" value={`${predictedLb.toFixed(2)} lb`} detail="Linked waste items" />
+        <Stat label="Predicted tracked lb" value={`${predictedLb.toFixed(2)} lb`} detail="Linked cool down items" />
         <Stat label="Counted tracked lb" value={`${actualLb.toFixed(2)} lb`} detail="Same comparison set" />
-        <Stat label="Tracked variance" value={`${varianceLb >= 0 ? '+' : ''}${varianceLb.toFixed(2)} lb`} detail={varianceLb > 0.01 ? 'Possible unlogged waste' : 'At or below prediction'} tone={varianceLb > 0.01 ? 'danger' : undefined} />
+        <Stat label="Tracked variance" value={`${varianceLb >= 0 ? '+' : ''}${varianceLb.toFixed(2)} lb`} detail={varianceLb > 0.01 ? 'Possible unlogged cool down' : 'At or below prediction'} tone={varianceLb > 0.01 ? 'danger' : undefined} />
       </div>
       <div className="donation-toolbar">
         <span>{editing ? 'Review counts before submitting.' : `Final count by ${existing?.initials || ''}`}</span>
@@ -1239,7 +1239,7 @@ function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDay
         ? await loadDemoWasteForDateRange(storeId, exportStartDate, exportEndDate)
         : await loadWasteForDateRange(storeId, exportStartDate, exportEndDate);
       if (events.length === 0) {
-        notify(`No waste data was found from ${exportStartDate} through ${exportEndDate}.`);
+        notify(`No cool down data was found from ${exportStartDate} through ${exportEndDate}.`);
         return;
       }
       const trend = buildWasteTrend(events, draft, exportGrouping);
@@ -1259,14 +1259,14 @@ function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDay
       link.href = url;
       const sourcePrefix = exportSource === 'demo' ? 'demo-' : '';
       link.download = exportDays === 1
-        ? `${sourcePrefix}waste-${exportEndDate}-by-${exportGrouping}-${exportMetric}.xlsx`
-        : `${sourcePrefix}waste-${exportDays}-days-ending-${exportEndDate}-by-${exportGrouping}-${exportMetric}.xlsx`;
+        ? `${sourcePrefix}cool-down-${exportEndDate}-by-${exportGrouping}-${exportMetric}.xlsx`
+        : `${sourcePrefix}cool-down-${exportDays}-days-ending-${exportEndDate}-by-${exportGrouping}-${exportMetric}.xlsx`;
       link.style.display = 'none';
       document.body.appendChild(link);
       link.click();
       link.remove();
       window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
-      notify(`${exportDays}-day waste export downloaded.`);
+      notify(`${exportDays}-day cool down export downloaded.`);
     } catch (caught) {
       notify(errorMessage(caught));
     } finally {
@@ -1386,7 +1386,7 @@ function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDay
             {draft.products.map((product) => {
               return (
                 <tr key={product.id}>
-                  <td><strong>{product.name}</strong><span className="cell-detail">Used for waste cost and donation estimates</span></td>
+                  <td><strong>{product.name}</strong><span className="cell-detail">Used for cool down cost and donation estimates</span></td>
                   <td><input className="table-input" type="number" min="0.01" step="0.01" value={product.unitCost} onChange={(event) => updateProduct(product.id, { unitCost: Number(event.target.value) || 0 })} /></td>
                   <td><input className="table-input" type="number" min="0.001" step="0.01" value={product.averageWeightLb} onChange={(event) => updateProduct(product.id, { averageWeightLb: Number(event.target.value) || 0 })} /></td>
                 </tr>
@@ -1431,7 +1431,7 @@ function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDay
         <summary>Export reports</summary>
         <div className="export-panel">
         <div>
-          <p>Download waste trends or submitted donation totals and averages for the selected range.</p>
+          <p>Download cool down trends or submitted donation totals and averages for the selected range.</p>
         </div>
         <label>
           Starting date
@@ -1473,7 +1473,7 @@ function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDay
           </select>
         </label>
         <label>
-          Waste aggregate by
+          Cool Down aggregate by
           <select value={exportGrouping} onChange={(event) => {
             setExportGrouping(event.target.value as WasteExportGrouping);
           }}>
@@ -1482,7 +1482,7 @@ function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDay
           </select>
         </label>
         <label>
-          Waste values
+          Cool Down values
           <select value={exportMetric} onChange={(event) => {
             setExportMetric(event.target.value as 'cost' | 'quantity');
           }}>
@@ -1491,7 +1491,7 @@ function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDay
           </select>
         </label>
         <button className="primary-button" onClick={exportWaste} disabled={exporting || !exportStartDate || !exportEndDate}>
-          <Download aria-hidden="true" /> {exporting ? 'Preparing…' : 'Download waste workbook'}
+          <Download aria-hidden="true" /> {exporting ? 'Preparing…' : 'Download cool down workbook'}
         </button>
         <button className="secondary-button" onClick={exportDonations} disabled={exportingDonations || !exportStartDate || !exportEndDate}>
           <Download aria-hidden="true" /> {exportingDonations ? 'Preparing…' : 'Download donations workbook'}

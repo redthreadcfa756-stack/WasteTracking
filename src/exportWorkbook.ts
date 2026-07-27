@@ -69,7 +69,7 @@ export async function createDonationWorkbook({
   source: 'live' | 'demo';
 }): Promise<ArrayBuffer> {
   const workbook = new ExcelJS.Workbook();
-  workbook.creator = 'WasteTracker';
+  workbook.creator = 'CoolDownTracker';
   workbook.created = new Date();
   workbook.subject = 'Donation totals report';
 
@@ -147,9 +147,9 @@ export async function createWasteTrendWorkbook({
   metric: 'cost' | 'quantity';
 }): Promise<ArrayBuffer> {
   const workbook = new ExcelJS.Workbook();
-  workbook.creator = 'WasteTracker';
+  workbook.creator = 'CoolDownTracker';
   workbook.created = new Date();
-  workbook.subject = 'Waste opportunity trend report';
+  workbook.subject = 'Cool Down trend report';
 
   const productNames = settings.products.map((product) => product.name);
   const labels = timeLabels(settings, grouping);
@@ -159,7 +159,7 @@ export async function createWasteTrendWorkbook({
   });
   const lastColumn = Math.max(2, productNames.length + 1);
 
-  applyTitle(matrix, lastColumn, 'Waste Opportunity Matrix');
+  applyTitle(matrix, lastColumn, 'Cool Down Matrix');
   matrix.getCell('A2').value = 'Date range';
   matrix.getCell('B2').value = startDayKey;
   matrix.getCell('C2').value = endDayKey;
@@ -167,8 +167,8 @@ export async function createWasteTrendWorkbook({
   matrix.getCell('B3').value = source === 'demo' ? 'Demo data' : 'Live data';
   matrix.getCell('A4').value = 'How to read';
   matrix.getCell('B4').value = metric === 'cost'
-    ? 'Each value is average waste dollars per logged day. The top three dollar-waste times for each product are highlighted yellow.'
-    : 'Each value is average units wasted per logged day. The top three unit-waste times for each product are highlighted yellow.';
+    ? 'Each value is average cool down dollars per logged day. The top three dollar cool down times for each product are highlighted yellow.'
+    : 'Each value is average cool down units per logged day. The top three unit cool down times for each product are highlighted yellow.';
   matrix.mergeCells(4, 2, 4, lastColumn);
   matrix.getCell('A5').value = grouping === 'hour' ? 'Hour' : 'Daypart';
   productNames.forEach((name, index) => {

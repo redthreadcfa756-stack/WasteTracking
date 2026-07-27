@@ -1,6 +1,6 @@
-# Waste + SOS Tracker
+# Cool Down + SOS Tracker
 
-An iOS-first installable web app with live multi-device waste tracking, hourly SOS entries, Shared Table reconciliation, and protected admin settings.
+An iOS-first installable web app with live multi-device cool down tracking, hourly SOS entries, Shared Table reconciliation, and protected admin settings.
 
 ## Architecture
 
@@ -54,7 +54,7 @@ Change `VITE_ADMIN_PASSWORD` to the desired store password before building. The 
 
 Open the app, enter the configured password in Admin, and press **Save all changes** once. This creates `stores/00756/settings/app` from the built-in defaults.
 
-Then open the app in two browser windows. A waste tap in one should appear in the other through the Firestore realtime listener.
+Then open the app in two browser windows. A cool down tap in one should appear in the other through the Firestore realtime listener.
 
 ## 5. Create the Cloudflare Pages project
 
@@ -97,7 +97,7 @@ Push the repository:
 ```bash
 git init
 git add .
-git commit -m "Initial Waste and SOS tracker"
+git commit -m "Initial Cool Down and SOS tracker"
 git branch -M main
 git remote add origin https://github.com/YOUR-ACCOUNT/YOUR-REPOSITORY.git
 git push -u origin main

@@ -1,7 +1,7 @@
 {
-  "name": "Waste and SOS Tracker",
-  "short_name": "Waste + SOS",
-  "description": "Real-time waste, SOS, and Shared Table donation tracking.",
+  "name": "Cool Down and SOS Tracker",
+  "short_name": "Cool Down + SOS",
+  "description": "Real-time cool down, SOS, and Shared Table donation tracking.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#f7f5f2",
