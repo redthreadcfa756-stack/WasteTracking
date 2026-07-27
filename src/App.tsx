@@ -62,6 +62,7 @@ import {
   mergeActivity,
   parseDuration,
   productWaste,
+  quantityAdjustmentFromDrag,
   targetDollarForProduct,
   type WasteExportGrouping,
 } from './domain';
@@ -837,7 +838,7 @@ function WasteTab({
                 daypartCost={combinedTotals.cost}
                 onAdd={() => adjustWaste(product, product.tapQuantity)}
                 onSubtract={() => subtractWaste(product, coolDownTotals.units)}
-                onAdjustQuantity={product.id === 'grilled-nuggets'
+                onAdjustQuantity={settings.cardScrubEnabled
                   ? (adjustment) => {
                     if (adjustment > 0) {
                       void adjustWaste(product, adjustment);
@@ -903,20 +904,6 @@ function WasteTab({
   );
 }
 
-const GRILLED_NUGGET_SCRUB_MAX = 24;
-const SCRUB_DEAD_ZONE_PX = 8;
-const SCRUB_PIXELS_PER_NUGGET = 12;
-
-function scrubAdjustmentFromDistance(distance: number) {
-  if (Math.abs(distance) < SCRUB_DEAD_ZONE_PX) return 0;
-
-  const quantity = Math.min(
-    GRILLED_NUGGET_SCRUB_MAX,
-    1 + Math.floor((Math.abs(distance) - SCRUB_DEAD_ZONE_PX) / SCRUB_PIXELS_PER_NUGGET),
-  );
-  return Math.sign(distance) * quantity;
-}
-
 function useProductCardPress({
   onAdd,
   onSubtract,
@@ -971,7 +958,7 @@ function useProductCardPress({
       setHolding(false);
 
       if (onAdjustQuantity) {
-        const adjustment = scrubAdjustmentFromDistance(press.latestX - press.startX);
+        const adjustment = quantityAdjustmentFromDrag(press.latestX - press.startX);
         activeScrub.current = {
           pointerId: press.pointerId,
           startX: press.startX,
@@ -997,7 +984,8 @@ function useProductCardPress({
     const scrub = activeScrub.current;
     if (!scrub || scrub.pointerId !== event.pointerId) return;
 
-    const adjustment = scrubAdjustmentFromDistance(event.clientX - scrub.startX);
+    event.preventDefault();
+    const adjustment = quantityAdjustmentFromDrag(event.clientX - scrub.startX);
     if (adjustment === scrub.adjustment) return;
 
     scrub.adjustment = adjustment;
@@ -1011,35 +999,38 @@ function useProductCardPress({
     }
   };
 
-  const endPress = (event: ReactPointerEvent<HTMLButtonElement>) => {
+  const finishPress = (
+    event: ReactPointerEvent<HTMLButtonElement>,
+    releaseCapture: boolean,
+  ) => {
     clearPressTimer();
     setHolding(false);
     pendingPress.current = null;
-    releasePointer(event);
-
     const scrub = activeScrub.current;
-    if (!scrub || scrub.pointerId !== event.pointerId) return;
+    if (scrub?.pointerId === event.pointerId) {
+      activeScrub.current = null;
+      setScrubAdjustment(null);
+      longPressed.current = true;
+    }
 
-    activeScrub.current = null;
-    setScrubAdjustment(null);
-    longPressed.current = true;
-    if (scrub.adjustment !== 0) {
+    if (releaseCapture) releasePointer(event);
+
+    if (scrub?.pointerId === event.pointerId && scrub.adjustment !== 0) {
       onAdjustQuantity?.(scrub.adjustment);
       navigator.vibrate?.(40);
     }
   };
 
-  const cancelPress = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    clearPressTimer();
-    setHolding(false);
-    pendingPress.current = null;
-    releasePointer(event);
+  const endPress = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    finishPress(event, true);
+  };
 
-    if (activeScrub.current?.pointerId === event.pointerId) {
-      activeScrub.current = null;
-      setScrubAdjustment(null);
-      longPressed.current = true;
-    }
+  const cancelPress = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    finishPress(event, true);
+  };
+
+  const lostPointerCapture = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    finishPress(event, false);
   };
 
   const clickPress = () => {
@@ -1057,11 +1048,18 @@ function useProductCardPress({
     movePress,
     endPress,
     cancelPress,
+    lostPointerCapture,
     clickPress,
   };
 }
 
-function QuantityScrubOverlay({ adjustment }: { adjustment: number }) {
+function QuantityScrubOverlay({
+  adjustment,
+  productName,
+}: {
+  adjustment: number;
+  productName: string;
+}) {
   const quantity = Math.abs(adjustment);
   const action = adjustment > 0 ? 'Add' : adjustment < 0 ? 'Subtract' : 'Choose quantity';
   const tone = adjustment > 0 ? ' is-adding' : adjustment < 0 ? ' is-subtracting' : '';
@@ -1072,7 +1070,7 @@ function QuantityScrubOverlay({ adjustment }: { adjustment: number }) {
       <span>
         {adjustment === 0
           ? action
-          : `${action} ${quantity} grilled nugget${quantity === 1 ? '' : 's'}`}
+          : `${action} ${quantity} · ${productName}`}
       </span>
       <small>Left subtracts · Right adds · Release to apply</small>
     </span>
@@ -1108,10 +1106,13 @@ function WasteCard({
       onPointerUp={press.endPress}
       onPointerCancel={press.cancelPress}
       onPointerLeave={onAdjustQuantity ? undefined : press.cancelPress}
+      onLostPointerCapture={onAdjustQuantity ? press.lostPointerCapture : undefined}
       onContextMenu={(event) => event.preventDefault()}
       onClick={press.clickPress}
     >
-      {press.scrubAdjustment !== null && <QuantityScrubOverlay adjustment={press.scrubAdjustment} />}
+      {press.scrubAdjustment !== null && (
+        <QuantityScrubOverlay adjustment={press.scrubAdjustment} productName={product.name} />
+      )}
       <span className="waste-card-top">
         <span className="waste-circle">{press.holding && !onAdjustQuantity ? '−' : '+'}</span>
         <span>{product.name}</span>
@@ -1263,7 +1264,7 @@ function DiscardTab({
                   daypartUnits={totals.units}
                   onAdd={() => void adjustDiscard(product, product.tapQuantity)}
                   onSubtract={() => subtractDiscard(product, totals.units)}
-                  onAdjustQuantity={product.id === 'grilled-nuggets'
+                  onAdjustQuantity={settings.cardScrubEnabled
                     ? (adjustment) => {
                       if (adjustment > 0) {
                         void adjustDiscard(product, adjustment);
@@ -1344,10 +1345,13 @@ function DiscardCard({ product, daypartUnits, onAdd, onSubtract, onAdjustQuantit
       onPointerUp={press.endPress}
       onPointerCancel={press.cancelPress}
       onPointerLeave={onAdjustQuantity ? undefined : press.cancelPress}
+      onLostPointerCapture={onAdjustQuantity ? press.lostPointerCapture : undefined}
       onContextMenu={(event) => event.preventDefault()}
       onClick={press.clickPress}
     >
-      {press.scrubAdjustment !== null && <QuantityScrubOverlay adjustment={press.scrubAdjustment} />}
+      {press.scrubAdjustment !== null && (
+        <QuantityScrubOverlay adjustment={press.scrubAdjustment} productName={product.name} />
+      )}
       <span className="waste-card-top">
         <span className="waste-circle">{press.holding && !onAdjustQuantity ? '−' : '+'}</span>
         <span>{product.name}</span>
@@ -1903,6 +1907,20 @@ function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDay
           <span className="toggle-copy">
             <strong>Show Discard tab</strong>
             <small>Track product sent directly to trash</small>
+          </span>
+        </label>
+        <label className="toggle-row">
+          <input
+            type="checkbox"
+            checked={draft.cardScrubEnabled}
+            onChange={(event) => setDraft((current) => ({
+              ...current,
+              cardScrubEnabled: event.target.checked,
+            }))}
+          />
+          <span className="toggle-copy">
+            <strong>Enable hold-and-slide card adjustments</strong>
+            <small>Shared across every device · Left subtracts, right adds</small>
           </span>
         </label>
         <label className="toggle-row">

@@ -42,6 +42,7 @@ export interface AppSettings {
   cooldownTimersEnabled: boolean;
   sosEnabled: boolean;
   discardTrackingEnabled: boolean;
+  cardScrubEnabled: boolean;
   products: ProductConfig[];
   dayparts: DaypartConfig[];
   donationItems: DonationItemConfig[];

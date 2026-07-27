@@ -74,6 +74,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   cooldownTimersEnabled: false,
   sosEnabled: true,
   discardTrackingEnabled: false,
+  cardScrubEnabled: true,
   products: DEFAULT_PRODUCTS,
   dayparts: DEFAULT_DAYPARTS,
   donationItems: DEFAULT_DONATION_ITEMS,

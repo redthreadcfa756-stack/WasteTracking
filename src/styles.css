@@ -918,6 +918,8 @@ label,
 
 .waste-card.quantity-scrub-card {
   touch-action: pan-y;
+  overscroll-behavior-x: contain;
+  -webkit-touch-callout: none;
 }
 
 .waste-card.is-scrubbing {

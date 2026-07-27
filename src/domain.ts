@@ -50,6 +50,27 @@ export function cooldownProductQuantity(
   return Math.max(0, timer.productQuantities?.[productId] || 0);
 }
 
+export function quantityAdjustmentFromDrag(
+  distance: number,
+  {
+    deadZonePx = 10,
+    pixelsPerQuantity = 7,
+    maxQuantity = 24,
+  }: {
+    deadZonePx?: number;
+    pixelsPerQuantity?: number;
+    maxQuantity?: number;
+  } = {},
+): number {
+  if (Math.abs(distance) < deadZonePx) return 0;
+
+  const quantity = Math.min(
+    maxQuantity,
+    1 + Math.floor((Math.abs(distance) - deadZonePx) / pixelsPerQuantity),
+  );
+  return Math.sign(distance) * quantity;
+}
+
 export function formatMoney(value: number): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
 }

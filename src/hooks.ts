@@ -102,6 +102,7 @@ export function useStoreData(storeId: string | undefined, now: Date) {
           cooldownTimersEnabled: value.cooldownTimersEnabled ?? false,
           sosEnabled: value.sosEnabled ?? true,
           discardTrackingEnabled: value.discardTrackingEnabled ?? false,
+          cardScrubEnabled: value.cardScrubEnabled ?? true,
           products: value.products.map((product) => {
             const normalized = product.id === 'nuggets'
               ? { ...product, menus: ['breakfast', 'lunch'] as typeof product.menus }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS, PRODUCT_TONES } from './defaults';
-import { adjustCooldownProductQuantities, buildDonationCsv, buildWasteCsv, cooldownProductQuantity, daypartWaste, detectDaypart, distributeDollarTarget, donationPrediction, formatDurationInput, mergeActivity, parseDuration } from './domain';
+import { adjustCooldownProductQuantities, buildDonationCsv, buildWasteCsv, cooldownProductQuantity, daypartWaste, detectDaypart, distributeDollarTarget, donationPrediction, formatDurationInput, mergeActivity, parseDuration, quantityAdjustmentFromDrag } from './domain';
 import type { CooldownTimer, DiscardEvent, DonationItemConfig, DonationRecord, WasteEvent } from './types';
 
 const event = (overrides: Partial<WasteEvent>): WasteEvent => ({
@@ -57,9 +57,19 @@ describe('domain rules', () => {
     expect(total.cost).toBe(8);
   });
 
-  it('defaults SOS on and direct discard tracking off', () => {
+  it('defaults shared navigation and card interaction settings', () => {
     expect(DEFAULT_SETTINGS.sosEnabled).toBe(true);
     expect(DEFAULT_SETTINGS.discardTrackingEnabled).toBe(false);
+    expect(DEFAULT_SETTINGS.cardScrubEnabled).toBe(true);
+  });
+
+  it('maps card drags to signed quantities with a center dead zone', () => {
+    expect(quantityAdjustmentFromDrag(9)).toBe(0);
+    expect(quantityAdjustmentFromDrag(-9)).toBe(0);
+    expect(quantityAdjustmentFromDrag(10)).toBe(1);
+    expect(quantityAdjustmentFromDrag(17)).toBe(2);
+    expect(quantityAdjustmentFromDrag(-31)).toBe(-4);
+    expect(quantityAdjustmentFromDrag(1_000)).toBe(24);
   });
 
   it('tracks and displays product quantities only for an active cooldown pan', () => {

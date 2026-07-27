@@ -8,7 +8,7 @@ stores/{storeId}
   name
   settings/app
     products[], dayparts[], donationItems[], warningCooldownSeconds,
-    sosEnabled, discardTrackingEnabled
+    sosEnabled, discardTrackingEnabled, cardScrubEnabled
   wasteEvents/{autoId}
     cool down product, quantity, cost snapshot, local day/daypart, device, creator, timestamp
   discardEvents/{autoId}
@@ -36,4 +36,4 @@ Cooldown pan quantities accumulate by product while a pan is active and reset wh
 
 Test Daypart entries exist only in the current browser session. They do not create cool down events, update cooldown timers, affect donations, or appear in exports.
 
-The SOS and Discard tabs can be shown or hidden for all devices from Admin. Existing data is retained when a tab is hidden. SOS defaults to shown for existing settings documents; Discard defaults to hidden until explicitly enabled.
+The SOS and Discard tabs can be shown or hidden for all devices from Admin. Hold-and-slide card adjustments can also be enabled or disabled store-wide. Existing data is retained when a feature is hidden or disabled. SOS and card scrubbing default to enabled for existing settings documents; Discard defaults to hidden until explicitly enabled.
