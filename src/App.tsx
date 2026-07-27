@@ -1022,7 +1022,6 @@ function DiscardTab({
                 <DiscardCard
                   product={product}
                   daypartUnits={totals.units}
-                  daypartCost={totals.cost}
                   onAdd={() => void adjustDiscard(product, product.tapQuantity)}
                   onSubtract={() => subtractDiscard(product, totals.units)}
                 />
@@ -1080,10 +1079,9 @@ function DiscardTab({
   );
 }
 
-function DiscardCard({ product, daypartUnits, daypartCost, onAdd, onSubtract }: {
+function DiscardCard({ product, daypartUnits, onAdd, onSubtract }: {
   product: ProductConfig;
   daypartUnits: number;
-  daypartCost: number;
   onAdd: () => void;
   onSubtract: () => void;
 }) {
@@ -1129,7 +1127,6 @@ function DiscardCard({ product, daypartUnits, daypartCost, onAdd, onSubtract }: 
       </span>
       <span className="waste-pan-label">Daypart direct discard</span>
       <span className="waste-total">{displayProductQuantity(product, daypartUnits)}</span>
-      <span className="waste-daypart-total">{formatMoney(daypartCost)} direct discard</span>
       <span className="waste-hint">Tap to add · Hold to subtract</span>
     </button>
   );
