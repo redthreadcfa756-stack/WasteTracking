@@ -1,6 +1,6 @@
 # Cool Down + SOS Tracker
 
-An iOS-first installable web app with live multi-device cool down tracking, optional reason-coded direct-discard tracking, daypart SOS entries, Shared Table reconciliation, and protected admin settings.
+An iOS-first installable web app with live multi-device cool down tracking, optional direct-discard tracking, combined daypart waste targets, daypart SOS entries, Shared Table reconciliation, and protected admin settings.
 
 ## Architecture
 

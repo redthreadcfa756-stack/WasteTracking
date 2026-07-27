@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS, PRODUCT_TONES } from './defaults';
-import { adjustCooldownProductQuantities, buildDonationCsv, buildWasteCsv, cooldownProductQuantity, detectDaypart, distributeDollarTarget, donationPrediction, formatDurationInput, mergeActivity, mergeDiscardActivity, parseDuration } from './domain';
+import { adjustCooldownProductQuantities, buildDonationCsv, buildWasteCsv, cooldownProductQuantity, daypartWaste, detectDaypart, distributeDollarTarget, donationPrediction, formatDurationInput, mergeActivity, parseDuration } from './domain';
 import type { CooldownTimer, DiscardEvent, DonationItemConfig, DonationRecord, WasteEvent } from './types';
 
 const event = (overrides: Partial<WasteEvent>): WasteEvent => ({
@@ -48,14 +48,13 @@ describe('domain rules', () => {
     expect(merged[0].displayQuantity).toBe(2);
   });
 
-  it('keeps discard reasons separate while merging rapid taps', () => {
-    const merged = mergeDiscardActivity([
-      discardEvent({ id: 'a', equivalentUnits: 1, displayQuantity: 1 }),
-      discardEvent({ id: 'b', equivalentUnits: 1, displayQuantity: 1, eventAt: new Date('2026-07-23T09:26:45') }),
-      discardEvent({ id: 'c', reason: 'raw', eventAt: new Date('2026-07-23T09:26:50') }),
-    ], DEFAULT_SETTINGS.products);
-    expect(merged).toHaveLength(2);
-    expect(merged.find((entry) => entry.reason === 'dropped')?.displayQuantity).toBe(2);
+  it('combines cool down and discard costs in daypart waste', () => {
+    const total = daypartWaste([
+      event({ id: 'cool-down', equivalentUnits: 1, unitCostSnapshot: 2 }),
+      discardEvent({ id: 'discard', equivalentUnits: 2, unitCostSnapshot: 3 }),
+    ], 'breakfast');
+    expect(total.units).toBe(3);
+    expect(total.cost).toBe(8);
   });
 
   it('defaults SOS on and direct discard tracking off', () => {

@@ -838,52 +838,10 @@ label,
   flex: 0 0 auto;
 }
 
-.discard-reason-panel {
-  display: grid;
-  gap: 0.9rem;
-  padding: 1rem;
-  border-left: 7px solid var(--danger);
-  background: #fff;
-}
-
-.discard-reason-panel > div:first-child {
-  display: grid;
-  gap: 0.2rem;
-}
-
-.discard-reason-panel > div:first-child strong,
 .discard-step-label {
   font-family: "Space Grotesk", Inter, sans-serif;
   font-weight: 800;
   text-transform: uppercase;
-}
-
-.discard-reason-panel > div:first-child span {
-  color: var(--muted);
-  font-size: 0.82rem;
-}
-
-.discard-reason-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.5rem;
-}
-
-.discard-reason-grid button {
-  min-width: 0;
-  padding: 0.55rem;
-  border: 1px solid var(--line);
-  border-radius: 0;
-  background: var(--soft);
-  color: var(--ink);
-  font-size: 0.78rem;
-  font-weight: 800;
-}
-
-.discard-reason-grid button.active {
-  border-color: var(--danger);
-  background: var(--danger);
-  color: #fff;
 }
 
 .discard-step-label {
@@ -1114,11 +1072,5 @@ label,
   .tabbar.tab-count-5 button svg {
     width: 18px;
     height: 18px;
-  }
-}
-
-@media (max-width: 420px) {
-  .discard-reason-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

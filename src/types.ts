@@ -131,8 +131,3 @@ export interface MergedActivity {
   deviceNames: string[];
   sourceEventIds: string[];
 }
-
-export interface MergedDiscardActivity extends MergedActivity {
-  reason: DiscardReason;
-  reasonDetail: string;
-}

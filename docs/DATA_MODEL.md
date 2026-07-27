@@ -12,8 +12,7 @@ stores/{storeId}
   wasteEvents/{autoId}
     cool down product, quantity, cost snapshot, local day/daypart, device, creator, timestamp
   discardEvents/{autoId}
-    direct-to-trash product, quantity, cost snapshot, reason/detail,
-    local day/daypart, device, creator, timestamp
+    direct-to-trash product, quantity, cost snapshot, local day/daypart, device, creator, timestamp
   sosEntries/{YYYY-MM-DD_HH}
     one overwriteable hourly average
   donationRecords/{YYYY-MM-DD}
@@ -25,7 +24,7 @@ stores/{storeId}
 
 Cool Down taps are separate immutable documents so simultaneous writes from different devices cannot overwrite each other. They remain stored under the legacy `wasteEvents` collection name for compatibility. The recent-activity UI merges documents by product and minute.
 
-Discard taps use their own immutable collection and never start a cooldown pan, count against a Cool Down target, contribute to donation predictions, or appear in Cool Down exports. Recent activity merges them by product, reason, detail, and minute.
+Discard taps use their own immutable collection. They count together with Cool Down entries toward the shared daypart waste target, but never start or change a cooldown pan, contribute to donation predictions, or appear in Cool Down exports. Recent activity merges them by product and minute.
 
 SOS document IDs are deterministic by date and daypart. Re-entering a daypart updates the same record. Older hourly records remain readable.
 

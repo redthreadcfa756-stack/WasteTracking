@@ -52,7 +52,6 @@ import {
   formatMoney,
   formatQuantity,
   mergeActivity,
-  mergeDiscardActivity,
   parseDuration,
   productWaste,
   targetDollarForProduct,
@@ -67,7 +66,6 @@ import type {
   CooldownTimer,
   DaypartId,
   DiscardEvent,
-  DiscardReason,
   DonationItemConfig,
   DonationRecord,
   MemberProfile,
@@ -92,19 +90,6 @@ const COOLDOWN_PANS: Array<{
   { id: 'pan-3', label: 'Pan 3', productIds: ['filets'] },
   { id: 'pan-4', label: 'Bottom pan (Pan 4)', productIds: ['spicy'] },
 ];
-const DISCARD_REASONS: Array<{ id: DiscardReason; label: string }> = [
-  { id: 'dropped', label: 'Dropped' },
-  { id: 'raw', label: 'Raw / undercooked' },
-  { id: 'overcooked', label: 'Overcooked' },
-  { id: 'contaminated', label: 'Contaminated' },
-  { id: 'quality', label: 'Quality issue' },
-  { id: 'other', label: 'Other' },
-];
-
-function discardReasonLabel(reason: DiscardReason): string {
-  return DISCARD_REASONS.find((option) => option.id === reason)?.label || reason;
-}
-
 function confirmWrite<T>(write: Promise<T>): Promise<T> {
   return Promise.race([
     write,
@@ -466,6 +451,7 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
           <WasteTab
             settings={settings}
             events={storeData.todayWaste}
+            discardEvents={storeData.discardEvents}
             cooldownTimers={storeData.cooldownTimers}
             testMode={testDaypartEnabled}
             testEvents={testWasteEvents}
@@ -485,12 +471,15 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
           <DiscardTab
             settings={settings}
             events={storeData.discardEvents}
+            coolDownEvents={storeData.todayWaste}
             member={member}
             deviceName={deviceName}
             effectiveMenu={effectiveMenu}
             menuSelection={menuSelection}
             setMenuSelection={setMenuSelection}
             targetDaypartId={targetDaypartId}
+            warningMutedUntil={warningMutedUntil}
+            showWarning={setWarning}
             notify={notify}
           />
         )}
@@ -543,11 +532,11 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
         />
       )}
       {warning && (
-        <Modal title="Cool Down is over target" icon={<AlertTriangle />} onClose={() => {
+        <Modal title="Daypart waste is over target" icon={<AlertTriangle />} onClose={() => {
           setWarning(null);
           setWarningMutedUntil(Date.now() + settings.warningCooldownSeconds * 1000);
         }}>
-          <p>{warning.daypart} cool down is now {formatMoney(warning.total)} against a {formatMoney(warning.target)} target.</p>
+          <p>{warning.daypart} waste is now {formatMoney(warning.total)} against a {formatMoney(warning.target)} target.</p>
           <button className="primary-button" onClick={() => {
             setWarning(null);
             setWarningMutedUntil(Date.now() + settings.warningCooldownSeconds * 1000);
@@ -574,6 +563,7 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
 function WasteTab({
   settings,
   events,
+  discardEvents,
   cooldownTimers,
   testMode,
   testEvents,
@@ -590,6 +580,7 @@ function WasteTab({
 }: {
   settings: AppSettings;
   events: WasteEvent[];
+  discardEvents: DiscardEvent[];
   cooldownTimers: CooldownTimer[];
   testMode: boolean;
   testEvents: WasteEvent[];
@@ -609,7 +600,12 @@ function WasteTab({
   const daypart = settings.dayparts.find((candidate) => candidate.id === targetDaypartId)!;
   const displayedEvents = testMode ? testEvents : events;
   const menuEvents = displayedEvents.filter((event) => event.menu === effectiveMenu);
-  const activeWaste = daypartWaste(displayedEvents, targetDaypartId);
+  const coolDownDaypartEvents = displayedEvents.filter((event) => event.daypartId === targetDaypartId);
+  const discardDaypartEvents = testMode
+    ? []
+    : discardEvents.filter((event) => event.daypartId === targetDaypartId);
+  const combinedDaypartEvents = [...coolDownDaypartEvents, ...discardDaypartEvents];
+  const activeWaste = daypartWaste(combinedDaypartEvents, targetDaypartId);
   const merged = mergeActivity(menuEvents, settings.products);
   const targetVariance = activeWaste.cost - daypart.totalDollarTarget;
   const varianceDetail = Math.abs(targetVariance) < 0.005
@@ -746,22 +742,23 @@ function WasteTab({
 
       <div className="stat-grid one">
         <Stat
-          label={`${testMode ? 'Test · ' : ''}${daypart.label} cool down / target`}
+          label={`${testMode ? 'Test · ' : ''}${daypart.label} waste / target`}
           value={`${formatMoney(activeWaste.cost)} / ${formatMoney(daypart.totalDollarTarget)}`}
-          detail={`${varianceDetail}${testMode ? ' · Local only' : ''}`}
+          detail={`${varianceDetail}${testMode ? ' · Local only' : ' · Cool Down + discard'}`}
           tone={targetVariance > 0 ? 'danger' : undefined}
         />
       </div>
 
       <div className="waste-grid">
         {products.map((product) => {
-          const totals = productWaste(menuEvents, product.id);
+          const coolDownTotals = productWaste(coolDownDaypartEvents, product.id);
+          const combinedTotals = productWaste(combinedDaypartEvents, product.id);
           const pan = COOLDOWN_PANS.find((candidate) => candidate.productIds.includes(product.id));
           const activeTimer = !testMode && settings.cooldownTimersEnabled && pan
             ? cooldownTimers.find((timer) => timer.id === pan.id && timer.active)
             : undefined;
           const currentPanUnits = testMode
-            ? pan ? Math.max(0, totals.units) : null
+            ? pan ? Math.max(0, coolDownTotals.units) : null
             : cooldownProductQuantity(activeTimer, product.id);
           const currentPanLabel = testMode
             ? pan ? `${pan.label} · Test pan` : 'No cooldown pan assigned'
@@ -776,10 +773,10 @@ function WasteTab({
                 product={product}
                 currentPanUnits={currentPanUnits}
                 currentPanLabel={currentPanLabel}
-                daypartUnits={totals.units}
-                daypartCost={totals.cost}
+                daypartUnits={combinedTotals.units}
+                daypartCost={combinedTotals.cost}
                 onAdd={() => adjustWaste(product, product.tapQuantity)}
-                onSubtract={() => subtractWaste(product, totals.units)}
+                onSubtract={() => subtractWaste(product, coolDownTotals.units)}
               />
               {product.trackingUnit === 'cup' && (
                 <button
@@ -891,7 +888,7 @@ function WasteCard({ product, currentPanUnits, currentPanLabel, daypartUnits, da
         {currentPanUnits === null ? 'No active pan' : displayProductQuantity(product, currentPanUnits)}
       </span>
       <span className="waste-daypart-total">
-        Daypart: {displayProductQuantity(product, daypartUnits)} · {formatMoney(daypartCost)}
+        Daypart waste: {displayProductQuantity(product, daypartUnits)} · {formatMoney(daypartCost)}
       </span>
       <span className="waste-hint">Tap to add · Hold to subtract</span>
     </button>
@@ -901,48 +898,45 @@ function WasteCard({ product, currentPanUnits, currentPanLabel, daypartUnits, da
 function DiscardTab({
   settings,
   events,
+  coolDownEvents,
   member,
   deviceName,
   effectiveMenu,
   menuSelection,
   setMenuSelection,
   targetDaypartId,
+  warningMutedUntil,
+  showWarning,
   notify,
 }: {
   settings: AppSettings;
   events: DiscardEvent[];
+  coolDownEvents: WasteEvent[];
   member: MemberProfile;
   deviceName: string;
   effectiveMenu: MenuId;
   menuSelection: MenuSelection;
   setMenuSelection: (selection: MenuSelection) => void;
   targetDaypartId: DaypartId;
+  warningMutedUntil: number;
+  showWarning: (warning: { daypart: string; total: number; target: number }) => void;
   notify: (message: string) => void;
 }) {
-  const [selectedReason, setSelectedReason] = useState<DiscardReason | null>(null);
-  const [reasonDetail, setReasonDetail] = useState('');
   const [nuggetPicker, setNuggetPicker] = useState<ProductConfig | null>(null);
   const products = settings.products.filter((product) => product.menus.includes(effectiveMenu));
   const daypart = settings.dayparts.find((candidate) => candidate.id === targetDaypartId)!;
   const menuEvents = events.filter((event) => event.menu === effectiveMenu);
   const activeEvents = menuEvents.filter((event) => event.daypartId === targetDaypartId);
-  const activeDiscard = daypartWaste(activeEvents, targetDaypartId);
-  const merged = mergeDiscardActivity(menuEvents, settings.products);
-
-  const reasonReady = () => {
-    if (!selectedReason) {
-      notify('Choose a discard reason before logging a product.');
-      return false;
-    }
-    if (selectedReason === 'other' && !reasonDetail.trim()) {
-      notify('Add a short explanation for the Other reason.');
-      return false;
-    }
-    return true;
-  };
+  const coolDownDaypartEvents = coolDownEvents.filter((event) => event.daypartId === targetDaypartId);
+  const combinedDaypartEvents = [...coolDownDaypartEvents, ...activeEvents];
+  const activeWaste = daypartWaste(combinedDaypartEvents, targetDaypartId);
+  const merged = mergeActivity(menuEvents, settings.products);
+  const targetVariance = activeWaste.cost - daypart.totalDollarTarget;
+  const varianceDetail = Math.abs(targetVariance) < 0.005
+    ? 'On target'
+    : `${formatMoney(Math.abs(targetVariance))} ${targetVariance > 0 ? 'over' : 'under'} target`;
 
   const adjustDiscard = async (product: ProductConfig, equivalentUnits: number) => {
-    if (!reasonReady() || !selectedReason) return;
     const isCup = product.trackingUnit === 'cup' && Math.abs(equivalentUnits) === (product.unitsPerCup || 14);
     const eventData: Omit<DiscardEvent, 'id' | 'eventAt'> = {
       storeId: member.storeId,
@@ -958,12 +952,16 @@ function DiscardTab({
       deviceName,
       createdBy: member.uid,
       createdByName: member.displayName,
-      reason: selectedReason,
-      reasonDetail: selectedReason === 'other' ? reasonDetail.trim() : '',
+      reason: 'other',
+      reasonDetail: '',
     };
 
     try {
       await confirmWrite(createDiscardEvent(eventData));
+      const projectedCost = activeWaste.cost + equivalentUnits * product.unitCost;
+      if (projectedCost > daypart.totalDollarTarget && Date.now() >= warningMutedUntil) {
+        showWarning({ daypart: daypart.label, total: projectedCost, target: daypart.totalDollarTarget });
+      }
     } catch (caught) {
       notify(errorMessage(caught));
     }
@@ -1005,52 +1003,17 @@ function DiscardTab({
         </label>
       </div>
 
-      <div className="discard-reason-panel">
-        <div>
-          <strong>1. Choose why it was discarded</strong>
-          <span>The selected reason stays active for rapid product entry.</span>
-        </div>
-        <div className="discard-reason-grid" role="group" aria-label="Discard reason">
-          {DISCARD_REASONS.map((reason) => (
-            <button
-              type="button"
-              key={reason.id}
-              className={selectedReason === reason.id ? 'active' : ''}
-              aria-pressed={selectedReason === reason.id}
-              onClick={() => {
-                setSelectedReason(reason.id);
-                if (reason.id !== 'other') setReasonDetail('');
-              }}
-            >
-              {reason.label}
-            </button>
-          ))}
-        </div>
-        {selectedReason === 'other' && (
-          <label>
-            What happened?
-            <input
-              autoFocus
-              maxLength={120}
-              placeholder="Short explanation"
-              value={reasonDetail}
-              onChange={(event) => setReasonDetail(event.target.value)}
-            />
-          </label>
-        )}
-      </div>
-
       <div className="stat-grid one">
         <Stat
-          label={`${daypart.label} direct discard`}
-          value={formatMoney(activeDiscard.cost)}
-          detail="Kept separate from Cool Down, targets, and donations"
-          tone={activeDiscard.cost > 0 ? 'danger' : undefined}
+          label={`${daypart.label} waste / target`}
+          value={`${formatMoney(activeWaste.cost)} / ${formatMoney(daypart.totalDollarTarget)}`}
+          detail={`${varianceDetail} · Cool Down + discard`}
+          tone={targetVariance > 0 ? 'danger' : undefined}
         />
       </div>
 
       <div>
-        <p className="discard-step-label">2. Tap each product sent directly to trash</p>
+        <p className="discard-step-label">Tap each product sent directly to trash</p>
         <div className="waste-grid">
           {products.map((product) => {
             const totals = productWaste(activeEvents, product.id);
@@ -1060,16 +1023,13 @@ function DiscardTab({
                   product={product}
                   daypartUnits={totals.units}
                   daypartCost={totals.cost}
-                  reasonLabel={selectedReason ? discardReasonLabel(selectedReason) : ''}
                   onAdd={() => void adjustDiscard(product, product.tapQuantity)}
                   onSubtract={() => subtractDiscard(product, totals.units)}
                 />
                 {product.trackingUnit === 'cup' && (
                   <button
                     className="individual-nuggets-button"
-                    onClick={() => {
-                      if (reasonReady()) setNuggetPicker(product);
-                    }}
+                    onClick={() => setNuggetPicker(product)}
                   >
                     Add individual nuggets
                   </button>
@@ -1081,7 +1041,7 @@ function DiscardTab({
       </div>
 
       <div className="section-heading activity-heading">
-        <div><p className="eyebrow">Merged by product, reason, and minute</p><h2>Recent discard activity</h2></div>
+        <div><p className="eyebrow">Merged by product and minute</p><h2>Recent discard activity</h2></div>
         <button className="secondary-button small" onClick={undoLast} disabled={!events.some((event) => event.createdBy === member.uid)}>
           <RotateCcw aria-hidden="true" /> Undo last
         </button>
@@ -1090,13 +1050,12 @@ function DiscardTab({
         {merged.length === 0 && <EmptyState>No direct discard logged for this menu yet.</EmptyState>}
         {merged.slice(0, 12).map((entry) => {
           const product = settings.products.find((candidate) => candidate.id === entry.productId)!;
-          const reason = `${discardReasonLabel(entry.reason)}${entry.reasonDetail ? ` · ${entry.reasonDetail}` : ''}`;
           return (
             <div className="activity-row" key={entry.key}>
               <span className={`activity-dot tone-${product.tone}`} />
               <div>
                 <strong>{displayProductQuantity(product, entry.equivalentUnits)} {product.name}</strong>
-                <span>{reason} · {entry.occurredAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} · {entry.deviceNames.join(', ')}</span>
+                <span>{entry.occurredAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} · {entry.deviceNames.join(', ')}</span>
               </div>
               <strong>{formatMoney(entry.cost)}</strong>
             </div>
@@ -1121,11 +1080,10 @@ function DiscardTab({
   );
 }
 
-function DiscardCard({ product, daypartUnits, daypartCost, reasonLabel, onAdd, onSubtract }: {
+function DiscardCard({ product, daypartUnits, daypartCost, onAdd, onSubtract }: {
   product: ProductConfig;
   daypartUnits: number;
   daypartCost: number;
-  reasonLabel: string;
   onAdd: () => void;
   onSubtract: () => void;
 }) {
@@ -1171,7 +1129,7 @@ function DiscardCard({ product, daypartUnits, daypartCost, reasonLabel, onAdd, o
       </span>
       <span className="waste-pan-label">Daypart direct discard</span>
       <span className="waste-total">{displayProductQuantity(product, daypartUnits)}</span>
-      <span className="waste-daypart-total">{formatMoney(daypartCost)} · {reasonLabel || 'Choose a reason above'}</span>
+      <span className="waste-daypart-total">{formatMoney(daypartCost)} direct discard</span>
       <span className="waste-hint">Tap to add · Hold to subtract</span>
     </button>
   );

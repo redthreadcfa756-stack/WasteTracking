@@ -126,7 +126,7 @@ export function useStoreData(storeId: string | undefined, now: Date) {
   }, [storeId, today, previous]);
 
   useEffect(() => {
-    if (!storeId || !settings?.discardTrackingEnabled) {
+    if (!storeId) {
       setDiscardEvents([]);
       return;
     }
@@ -134,7 +134,7 @@ export function useStoreData(storeId: string | undefined, now: Date) {
       setError(caught.message);
       setReady(true);
     });
-  }, [storeId, today, settings?.discardTrackingEnabled]);
+  }, [storeId, today]);
 
   return { settings, todayWaste, previousWaste, discardEvents, sosEntries, donationRecord, cooldownTimers, error, ready, today };
 }
