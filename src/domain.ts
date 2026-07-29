@@ -7,6 +7,7 @@ import type {
   DonationRecord,
   MergedActivity,
   ProductConfig,
+  WeightUnit,
   WasteEvent,
 } from './types';
 
@@ -48,6 +49,41 @@ export function cooldownProductQuantity(
 ): number | null {
   if (!timer?.active) return null;
   return Math.max(0, timer.productQuantities?.[productId] || 0);
+}
+
+export function weightToPounds(value: number, unit: WeightUnit): number {
+  if (unit === 'oz') return value / 16;
+  if (unit === 'g') return value / 453.59237;
+  return value;
+}
+
+export function withDerivedProductPricing(product: ProductConfig): ProductConfig {
+  const averageWeightLb = product.perUnitWeight === undefined
+    ? product.averageWeightLb
+    : weightToPounds(product.perUnitWeight, product.perUnitWeightUnit || 'lb');
+  const hasCasePricing = (product.caseCost || 0) > 0
+    && (product.caseWeightLb || 0) > 0
+    && averageWeightLb > 0;
+  const unitCost = hasCasePricing
+    ? (product.caseCost || 0) * (averageWeightLb / (product.caseWeightLb || 1))
+    : product.unitCost;
+
+  return {
+    ...product,
+    averageWeightLb,
+    unitCost,
+  };
+}
+
+export function targetCasesForProduct(
+  product: ProductConfig,
+  targetQuantity: number,
+): number | null {
+  if (!product.caseWeightLb || product.caseWeightLb <= 0) return null;
+  const equivalentUnits = product.trackingUnit === 'cup'
+    ? targetQuantity * (product.unitsPerCup || product.tapQuantity)
+    : targetQuantity;
+  return equivalentUnits * product.averageWeightLb / product.caseWeightLb;
 }
 
 export function quantityAdjustmentFromDrag(

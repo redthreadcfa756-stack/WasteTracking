@@ -56,7 +56,9 @@ Open the app, enter the configured password in Admin, and press **Save all chang
 
 Then open the app in two browser windows. A cool down tap in one should appear in the other through the Firestore realtime listener.
 
-Admin can show or hide the SOS and Discard tabs and enable or disable hold-and-slide card adjustments for all devices. Deploy the included Firestore rules and indexes before enabling Discard so its isolated `discardEvents` collection can sync.
+Admin can configure case cost, case weight, and per-unit weights in ounces, pounds, or grams; the app derives unit pricing, daypart case allowances, and full-day case allowances. Admin can also show or hide the SOS and Discard tabs and enable or disable hold-and-slide card adjustments for all devices. Deploy the included Firestore rules and indexes before enabling Discard so its isolated `discardEvents` collection can sync.
+
+Breakfast Cool Down entries use the shared four-pan timer system: grilled breakfast items and eggs use Pan 1, nuggets use Pan 2, breakfast filets use Pan 3, and breakfast spicy uses Pan 4.
 
 ## 5. Create the Cloudflare Pages project
 

@@ -22,6 +22,10 @@ stores/{storeId}
     productQuantities{productId: equivalentUnits}
 ```
 
+Products may include whole-case cost, whole-case weight in pounds, and a per-unit weight entered in ounces, pounds, or grams. The app normalizes weight to pounds and derives per-unit cost, donation weight, and case-based target allowances.
+
+Cooldown pan assignments are shared across menus. At breakfast, grilled breakfast items and eggs join Pan 1, nuggets join Pan 2, breakfast filets join Pan 3, and breakfast spicy joins Pan 4.
+
 Cool Down taps are separate immutable documents so simultaneous writes from different devices cannot overwrite each other. They remain stored under the legacy `wasteEvents` collection name for compatibility. The recent-activity UI merges documents by product and minute.
 
 Discard taps use their own immutable collection. They count together with Cool Down entries toward the shared daypart waste target, but never start or change a cooldown pan, contribute to donation predictions, or appear in Cool Down exports. Recent activity merges them by product and minute.

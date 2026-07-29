@@ -3,6 +3,7 @@ import type { Timestamp } from 'firebase/firestore';
 export type MenuId = 'breakfast' | 'lunch';
 export type DaypartId = 'breakfast' | 'lunch' | 'afternoon' | 'early-dinner' | 'late-dinner';
 export type DonationUnit = 'lb' | 'each';
+export type WeightUnit = 'oz' | 'lb' | 'g';
 export type MemberRole = 'employee' | 'admin';
 export type CooldownPanId = 'pan-1' | 'pan-2' | 'pan-3' | 'pan-4';
 export type DiscardReason = 'dropped' | 'raw' | 'overcooked' | 'contaminated' | 'quality' | 'other';
@@ -13,6 +14,10 @@ export interface ProductConfig {
   menus: MenuId[];
   unitCost: number;
   averageWeightLb: number;
+  caseCost?: number;
+  caseWeightLb?: number;
+  perUnitWeight?: number;
+  perUnitWeightUnit?: WeightUnit;
   tapQuantity: number;
   trackingUnit: 'each' | 'cup';
   unitsPerCup?: number;

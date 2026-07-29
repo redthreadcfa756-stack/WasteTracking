@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_SETTINGS, PRODUCT_TONES } from './defaults';
-import { adjustCooldownProductQuantities, buildDonationCsv, buildWasteCsv, cooldownProductQuantity, daypartWaste, detectDaypart, distributeDollarTarget, donationPrediction, formatDurationInput, mergeActivity, parseDuration, quantityAdjustmentFromDrag } from './domain';
+import { COOLDOWN_PANS, DEFAULT_SETTINGS, PRODUCT_TONES } from './defaults';
+import { adjustCooldownProductQuantities, buildDonationCsv, buildWasteCsv, cooldownProductQuantity, daypartWaste, detectDaypart, distributeDollarTarget, donationPrediction, formatDurationInput, mergeActivity, parseDuration, quantityAdjustmentFromDrag, targetCasesForProduct, targetDollarForProduct, weightToPounds, withDerivedProductPricing } from './domain';
 import type { CooldownTimer, DiscardEvent, DonationItemConfig, DonationRecord, WasteEvent } from './types';
 
 const event = (overrides: Partial<WasteEvent>): WasteEvent => ({
@@ -29,6 +29,20 @@ describe('domain rules', () => {
       'breakfast-spicy': 7,
       strips: 8,
     });
+  });
+
+  it('assigns every breakfast cool down product to its pan', () => {
+    const panForProduct = (productId: string) => (
+      COOLDOWN_PANS.find((pan) => pan.productIds.includes(productId))?.id
+    );
+    expect(panForProduct('grilled-breakfast')).toBe('pan-1');
+    expect(panForProduct('sausage')).toBe('pan-1');
+    expect(panForProduct('folded-yellow')).toBe('pan-1');
+    expect(panForProduct('folded-white')).toBe('pan-1');
+    expect(panForProduct('scrambled')).toBe('pan-1');
+    expect(panForProduct('nuggets')).toBe('pan-2');
+    expect(panForProduct('breakfast-filets')).toBe('pan-3');
+    expect(panForProduct('breakfast-spicy')).toBe('pan-4');
   });
 
   it('uses the requested daypart boundaries', () => {
@@ -70,6 +84,25 @@ describe('domain rules', () => {
     expect(quantityAdjustmentFromDrag(17)).toBe(2);
     expect(quantityAdjustmentFromDrag(-31)).toBe(-4);
     expect(quantityAdjustmentFromDrag(1_000)).toBe(24);
+  });
+
+  it('derives unit and cup pricing from case pricing and per-unit weight', () => {
+    const nuggets = withDerivedProductPricing({
+      ...DEFAULT_SETTINGS.products.find((product) => product.id === 'nuggets')!,
+      caseCost: 35,
+      caseWeightLb: 10,
+      perUnitWeight: 0.04,
+      perUnitWeightUnit: 'lb',
+    });
+    expect(nuggets.unitCost).toBeCloseTo(0.14);
+    expect(targetDollarForProduct(nuggets, 1)).toBeCloseTo(1.96);
+    expect(targetCasesForProduct(nuggets, 2)).toBeCloseTo(0.112);
+  });
+
+  it('normalizes ounces and grams to pounds', () => {
+    expect(weightToPounds(1, 'oz')).toBeCloseTo(0.0625);
+    expect(weightToPounds(453.59237, 'g')).toBeCloseTo(1);
+    expect(weightToPounds(2, 'lb')).toBe(2);
   });
 
   it('tracks and displays product quantities only for an active cooldown pan', () => {

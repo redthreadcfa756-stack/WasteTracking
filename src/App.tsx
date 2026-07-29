@@ -47,7 +47,7 @@ import {
   snoozeCooldownTimer,
   startOrJoinCooldownTimer,
 } from './data';
-import { DEFAULT_SETTINGS } from './defaults';
+import { COOLDOWN_PANS, DEFAULT_SETTINGS } from './defaults';
 import {
   daypartWaste,
   dayKey,
@@ -64,7 +64,9 @@ import {
   parseDuration,
   productWaste,
   quantityAdjustmentFromDrag,
+  targetCasesForProduct,
   targetDollarForProduct,
+  withDerivedProductPricing,
   type WasteExportGrouping,
 } from './domain';
 import { createDonationWorkbook, createWasteTrendWorkbook } from './exportWorkbook';
@@ -72,7 +74,6 @@ import { firebaseConfigured } from './firebase';
 import { useAuthUser, useDeviceName, useMember, useNow, useOnlineStatus, useStoreData } from './hooks';
 import type {
   AppSettings,
-  CooldownPanId,
   CooldownTimer,
   DaypartId,
   DiscardEvent,
@@ -81,6 +82,7 @@ import type {
   MemberProfile,
   MenuId,
   ProductConfig,
+  WeightUnit,
   SosEntry,
   WasteEvent,
 } from './types';
@@ -90,16 +92,6 @@ type MenuSelection = 'auto' | MenuId;
 type ExportPeriod = 1 | 30 | 60 | 90 | 'custom';
 const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || '00756';
 const WRITE_TIMEOUT_MS = 8_000;
-const COOLDOWN_PANS: Array<{
-  id: CooldownPanId;
-  label: string;
-  productIds: string[];
-}> = [
-  { id: 'pan-1', label: 'Top pan (Pan 1)', productIds: ['grilled-filets', 'grilled-nuggets'] },
-  { id: 'pan-2', label: 'Pan 2', productIds: ['nuggets', 'strips'] },
-  { id: 'pan-3', label: 'Pan 3', productIds: ['filets'] },
-  { id: 'pan-4', label: 'Bottom pan (Pan 4)', productIds: ['spicy'] },
-];
 function confirmWrite<T>(write: Promise<T>): Promise<T> {
   return Promise.race([
     write,
@@ -989,7 +981,7 @@ function WasteTab({
                   }
                   : undefined}
               />
-              {product.trackingUnit === 'cup' && (
+              {product.trackingUnit === 'cup' && !settings.cardScrubEnabled && (
                 <button
                   className="individual-nuggets-button"
                   onClick={() => setNuggetPicker(product)}
@@ -1256,7 +1248,7 @@ function WasteCard({
       )}
       <span className="waste-card-top">
         <span className="waste-circle">{press.holding && !onAdjustQuantity ? '−' : '+'}</span>
-        <span>{product.name}</span>
+        <span>{product.name} - {productTrackingPriceLabel(product)}</span>
       </span>
       <span className="waste-pan-label">{currentPanLabel}</span>
       <span className={`waste-total${currentPanUnits === null ? ' empty' : ''}`}>
@@ -1415,7 +1407,7 @@ function DiscardTab({
                     }
                     : undefined}
                 />
-                {product.trackingUnit === 'cup' && (
+                {product.trackingUnit === 'cup' && !settings.cardScrubEnabled && (
                   <button
                     className="individual-nuggets-button"
                     onClick={() => setNuggetPicker(product)}
@@ -1495,7 +1487,7 @@ function DiscardCard({ product, daypartUnits, onAdd, onSubtract, onAdjustQuantit
       )}
       <span className="waste-card-top">
         <span className="waste-circle">{press.holding && !onAdjustQuantity ? '−' : '+'}</span>
-        <span>{product.name}</span>
+        <span>{product.name} - {productTrackingPriceLabel(product)}</span>
       </span>
       <span className="waste-pan-label">Daypart direct discard</span>
       <span className="waste-total">{displayProductQuantity(product, daypartUnits)}</span>
@@ -1817,10 +1809,20 @@ function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDay
   const calculatedDaypartTarget = products.reduce((total, product) => (
     total + targetDollarForProduct(product, daypart.productTargetQuantities[product.id] || 0)
   ), 0);
+  const dailyCasesForProduct = (product: ProductConfig) => {
+    if (!product.caseWeightLb || product.caseWeightLb <= 0) return null;
+    return draft.dayparts.reduce((total, part) => (
+      total + (targetCasesForProduct(product, part.productTargetQuantities[product.id] || 0) || 0)
+    ), 0);
+  };
 
   const updateProduct = (productId: string, patch: Partial<ProductConfig>) => {
     setDraft((current) => {
-      const nextProducts = current.products.map((product) => product.id === productId ? { ...product, ...patch } : product);
+      const nextProducts = current.products.map((product) => (
+        product.id === productId
+          ? withDerivedProductPricing({ ...product, ...patch })
+          : product
+      ));
       return {
         ...current,
         products: nextProducts,
@@ -1853,8 +1855,12 @@ function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDay
   const save = async () => {
     setSaving(true);
     try {
-      await saveSettings(storeId, draft);
-      if (!draft.cooldownTimersEnabled) await resetAllCooldownTimers(storeId);
+      const settingsToSave = {
+        ...draft,
+        products: draft.products.map(withDerivedProductPricing),
+      };
+      await saveSettings(storeId, settingsToSave);
+      if (!settingsToSave.cooldownTimersEnabled) await resetAllCooldownTimers(storeId);
       localStorage.setItem('waste-sos-device-name', device.trim() || 'Web device');
       notify('Admin settings saved for every device.');
     } catch (caught) {
@@ -2094,17 +2100,86 @@ function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDay
         </div>
       </div>
       <details className="admin-dropdown">
-        <summary>Donations · Product unit costs and weights</summary>
+        <summary>Product case pricing and unit weights</summary>
       <div className="data-table-wrap">
         <table className="data-table admin-table">
-          <thead><tr><th>Product</th><th>Unit cost</th><th>Avg lb/unit</th></tr></thead>
+          <thead>
+            <tr>
+              <th>Product</th>
+              <th>Whole case cost</th>
+              <th>Whole case weight</th>
+              <th>Per-unit weight</th>
+              <th>Measurement</th>
+              <th>Calculated price</th>
+            </tr>
+          </thead>
           <tbody>
             {draft.products.map((product) => {
               return (
                 <tr key={product.id}>
-                  <td><strong>{product.name}</strong><span className="cell-detail">Used for cool down cost and donation estimates</span></td>
-                  <td><input className="table-input" type="number" min="0.01" step="0.01" value={product.unitCost} onChange={(event) => updateProduct(product.id, { unitCost: Number(event.target.value) || 0 })} /></td>
-                  <td><input className="table-input" type="number" min="0.001" step="0.01" value={product.averageWeightLb} onChange={(event) => updateProduct(product.id, { averageWeightLb: Number(event.target.value) || 0 })} /></td>
+                  <td>
+                    <strong>{product.name}</strong>
+                    <span className="cell-detail">
+                      {product.trackingUnit === 'cup' ? `${product.unitsPerCup || product.tapQuantity} units per cup` : 'Tracked per each'}
+                    </span>
+                  </td>
+                  <td>
+                    <input
+                      className="table-input"
+                      aria-label={`${product.name} whole case cost`}
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={product.caseCost || ''}
+                      onChange={(event) => updateProduct(product.id, { caseCost: Number(event.target.value) || 0 })}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      className="table-input"
+                      aria-label={`${product.name} whole case weight in pounds`}
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={product.caseWeightLb || ''}
+                      onChange={(event) => updateProduct(product.id, { caseWeightLb: Number(event.target.value) || 0 })}
+                    />
+                    <span className="cell-detail">Pounds</span>
+                  </td>
+                  <td>
+                    <input
+                      className="table-input"
+                      aria-label={`${product.name} per-unit weight`}
+                      type="number"
+                      min="0"
+                      step="0.001"
+                      value={product.perUnitWeight ?? product.averageWeightLb}
+                      onChange={(event) => updateProduct(product.id, { perUnitWeight: Number(event.target.value) || 0 })}
+                    />
+                  </td>
+                  <td>
+                    <select
+                      className="table-input"
+                      aria-label={`${product.name} per-unit weight measurement`}
+                      value={product.perUnitWeightUnit || 'lb'}
+                      onChange={(event) => updateProduct(product.id, {
+                        perUnitWeightUnit: event.target.value as WeightUnit,
+                      })}
+                    >
+                      <option value="oz">Ounces</option>
+                      <option value="lb">Pounds</option>
+                      <option value="g">Grams</option>
+                    </select>
+                  </td>
+                  <td>
+                    <output className="calculated-value">{productTrackingPriceLabel(product)}</output>
+                    {product.trackingUnit === 'cup' && (
+                      <span className="cell-detail">{formatMoney(product.unitCost)} per nugget</span>
+                    )}
+                    {(!product.caseCost || !product.caseWeightLb) && (
+                      <span className="cell-detail">Enter case cost and weight to recalculate</span>
+                    )}
+                  </td>
                 </tr>
               );
             })}
@@ -2120,16 +2195,28 @@ function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDay
         </div>
       <div className="data-table-wrap">
         <table className="data-table admin-table">
-          <thead><tr><th>Product</th><th>Target quantity</th><th>Target dollars</th></tr></thead>
+          <thead>
+            <tr>
+              <th>Product</th>
+              <th>Target quantity</th>
+              <th>Target dollars</th>
+              <th>Cases this daypart</th>
+              <th>Cases for full day</th>
+            </tr>
+          </thead>
           <tbody>
             {products.map((product) => {
               const quantity = daypart.productTargetQuantities[product.id] || 0;
               const targetDollars = targetDollarForProduct(product, quantity);
+              const daypartCases = targetCasesForProduct(product, quantity);
+              const dailyCases = dailyCasesForProduct(product);
               return (
                 <tr key={product.id}>
                   <td><strong>{product.name}</strong><span className="cell-detail">{product.trackingUnit === 'cup' ? 'Quantity in cups' : 'Quantity in each'}</span></td>
                   <td><input className="table-input" type="number" min="0" step="0.01" value={formatQuantity(quantity)} onChange={(event) => updateQuantity(product.id, Number(event.target.value) || 0)} /></td>
                   <td><output className="calculated-value">{formatMoney(targetDollars)}</output></td>
+                  <td><output className="calculated-value">{formatCases(daypartCases)}</output></td>
+                  <td><output className="calculated-value">{formatCases(dailyCases)}</output></td>
                 </tr>
               );
             })}
@@ -2138,6 +2225,7 @@ function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDay
             <tr>
               <td colSpan={2}><strong>Whole daypart target</strong></td>
               <td><strong>{formatMoney(calculatedDaypartTarget)}</strong></td>
+              <td colSpan={2} />
             </tr>
           </tfoot>
         </table>
@@ -2226,7 +2314,7 @@ function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDay
         </div>
         </div>
       </details>
-      <p className="footnote">Over-target alerts are muted for {draft.warningCooldownSeconds} seconds after dismissal. Donation predictions use the saved average weights.</p>
+      <p className="footnote">Over-target alerts are muted for {draft.warningCooldownSeconds} seconds after dismissal. Case pricing derives the per-unit cost; donation predictions use the normalized per-unit weight.</p>
     </section>
   );
 }
@@ -2291,6 +2379,19 @@ function formatHourRange(hour: number): string {
 
 function formatDonationNumber(value: number, unit: 'lb' | 'each'): string {
   return unit === 'lb' ? `${value.toFixed(2)} lb` : `${formatQuantity(value)} each`;
+}
+
+function productTrackingPriceLabel(product: ProductConfig): string {
+  const trackingQuantity = product.trackingUnit === 'cup'
+    ? product.unitsPerCup || product.tapQuantity
+    : 1;
+  const trackingUnit = product.trackingUnit === 'cup' ? 'cup' : 'each';
+  return `${formatMoney(product.unitCost * trackingQuantity)}/${trackingUnit}`;
+}
+
+function formatCases(value: number | null): string {
+  if (value === null) return 'Not configured';
+  return `${value.toFixed(3).replace(/0+$/, '').replace(/\.$/, '')} cases`;
 }
 
 export default App;

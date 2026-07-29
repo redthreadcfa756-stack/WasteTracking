@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { User } from 'firebase/auth';
 import { observeAuth, subscribeCooldownTimers, subscribeDiscardForDay, subscribeDonationRecord, subscribeSettings, subscribeSosForDay, subscribeWasteForDay } from './data';
 import { DEFAULT_DONATION_ITEMS, PRODUCT_TONES } from './defaults';
-import { dayKey, previousDayKey } from './domain';
+import { dayKey, previousDayKey, withDerivedProductPricing } from './domain';
 import type { AppSettings, CooldownTimer, DiscardEvent, DonationRecord, MemberProfile, SosEntry, WasteEvent } from './types';
 
 export function useAuthUser() {
@@ -107,10 +107,12 @@ export function useStoreData(storeId: string | undefined, now: Date) {
             const normalized = product.id === 'nuggets'
               ? { ...product, menus: ['breakfast', 'lunch'] as typeof product.menus }
               : product;
-            return {
+            return withDerivedProductPricing({
               ...normalized,
+              perUnitWeight: normalized.perUnitWeight ?? normalized.averageWeightLb,
+              perUnitWeightUnit: normalized.perUnitWeightUnit ?? 'lb',
               tone: PRODUCT_TONES[product.id] ?? product.tone,
-            };
+            });
           }),
           donationItems: DEFAULT_DONATION_ITEMS.map((defaultItem) => (
             value.donationItems.find((item) => item.id === defaultItem.id) || defaultItem
