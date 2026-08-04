@@ -1627,11 +1627,6 @@ function DonationsTab({ settings, previousWaste, currentWaste, existing, member,
     setEditing(!existing);
   }, [existing, settings.donationItems, predictions]);
 
-  const trackedLbItems = settings.donationItems.filter((item) => item.unit === 'lb' && predictions[item.id] !== null);
-  const predictedLb = trackedLbItems.reduce((sum, item) => sum + (predictions[item.id] || 0), 0);
-  const actualLb = trackedLbItems.reduce((sum, item) => sum + (actuals[item.id] || 0), 0);
-  const varianceLb = actualLb - predictedLb;
-
   const sourceLabel = (item: DonationItemConfig) => {
     if (item.sourceProductIds.length === 0) return 'Manual count';
     const previousUnits = previousWaste
@@ -1664,11 +1659,6 @@ function DonationsTab({ settings, previousWaste, currentWaste, existing, member,
           <h2>Donations reconciliation</h2>
         </div>
         {existing && <span className="status-badge"><Check aria-hidden="true" /> Submitted · revision {existing.revision}</span>}
-      </div>
-      <div className="stat-grid">
-        <Stat label="Predicted tracked lb" value={`${predictedLb.toFixed(2)} lb`} detail="Linked cool down items" />
-        <Stat label="Counted tracked lb" value={`${actualLb.toFixed(2)} lb`} detail="Same comparison set" />
-        <Stat label="Tracked variance" value={`${varianceLb >= 0 ? '+' : ''}${varianceLb.toFixed(2)} lb`} detail={varianceLb > 0.01 ? 'Possible unlogged cool down' : 'At or below prediction'} tone={varianceLb > 0.01 ? 'danger' : undefined} />
       </div>
       <div className="donation-toolbar">
         <span>{editing ? 'Enter weights right to left: 1, 2, 3 becomes 1.23 lb.' : `Final count by ${existing?.initials || ''}`}</span>
