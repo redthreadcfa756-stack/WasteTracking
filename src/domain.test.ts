@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { COOLDOWN_PANS, DEFAULT_SETTINGS, PRODUCT_TONES } from './defaults';
-import { adjustCooldownProductQuantities, buildDonationCsv, buildWasteCsv, cooldownProductQuantity, daypartWaste, detectDaypart, distributeDollarTarget, donationPrediction, formatDurationInput, mergeActivity, parseDuration, quantityAdjustmentFromDrag, targetCasesForProduct, targetDollarForProduct, weightToPounds, withDerivedProductPricing } from './domain';
+import { adjustCooldownProductQuantities, buildDonationCsv, buildWasteCsv, cooldownProductQuantity, daypartWaste, detectDaypart, distributeDollarTarget, donationPrediction, formatDurationInput, mergeActivity, parseDonationEntry, parseDuration, quantityAdjustmentFromDrag, targetCasesForProduct, targetDollarForProduct, weightToPounds, withDerivedProductPricing } from './domain';
 import type { CooldownTimer, DiscardEvent, DonationItemConfig, DonationRecord, WasteEvent } from './types';
 
 const event = (overrides: Partial<WasteEvent>): WasteEvent => ({
@@ -157,6 +157,15 @@ describe('domain rules', () => {
     expect(formatDurationInput('45')).toBe('0:45');
     expect(formatDurationInput('123')).toBe('1:23');
     expect(formatDurationInput('4:18')).toBe('4:18');
+  });
+
+  it('fills donation weights right to left without selecting decimals', () => {
+    expect(parseDonationEntry('1', 'lb')).toBe(0.01);
+    expect(parseDonationEntry('0.012', 'lb')).toBe(0.12);
+    expect(parseDonationEntry('0.123', 'lb')).toBe(1.23);
+    expect(parseDonationEntry('12.34', 'lb')).toBe(12.34);
+    expect(parseDonationEntry('', 'lb')).toBe(0);
+    expect(parseDonationEntry('012', 'each')).toBe(12);
   });
 
   it('exports net waste grouped by daypart', () => {

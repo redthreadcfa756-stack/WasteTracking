@@ -406,6 +406,7 @@ code { font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.9em; }
 .data-table td { font-size: 0.88rem; }
 .table-input { min-width: 92px; min-height: 38px; padding: 0.45rem 0.55rem; border-radius: 9px; }
 .table-input:disabled { opacity: 1; border-color: transparent; background: transparent; }
+.donation-entry-input { text-align: right; font-variant-numeric: tabular-nums; }
 .calculated-value { display: inline-flex; min-height: 38px; align-items: center; font-weight: 750; }
 .export-panel {
   display: grid;

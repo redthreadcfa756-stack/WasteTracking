@@ -61,6 +61,7 @@ import {
   formatMoney,
   formatQuantity,
   mergeActivity,
+  parseDonationEntry,
   parseDuration,
   productWaste,
   quantityAdjustmentFromDrag,
@@ -1670,7 +1671,7 @@ function DonationsTab({ settings, previousWaste, currentWaste, existing, member,
         <Stat label="Tracked variance" value={`${varianceLb >= 0 ? '+' : ''}${varianceLb.toFixed(2)} lb`} detail={varianceLb > 0.01 ? 'Possible unlogged cool down' : 'At or below prediction'} tone={varianceLb > 0.01 ? 'danger' : undefined} />
       </div>
       <div className="donation-toolbar">
-        <span>{editing ? 'Review counts before submitting.' : `Final count by ${existing?.initials || ''}`}</span>
+        <span>{editing ? 'Enter weights right to left: 1, 2, 3 becomes 1.23 lb.' : `Final count by ${existing?.initials || ''}`}</span>
         <div>
           {editing && <button className="secondary-button small" onClick={usePredictions}><Check /> Use tracked predictions</button>}
           {!editing && <button className="secondary-button small" onClick={() => setEditing(true)}><RotateCcw /> Edit final count</button>}
@@ -1692,14 +1693,18 @@ function DonationsTab({ settings, previousWaste, currentWaste, existing, member,
                   <td>{predicted === null ? '—' : formatDonationNumber(predicted, item.unit)}</td>
                   <td>
                     <input
-                      className="table-input"
-                      type="number"
-                      min="0"
-                      step={item.unit === 'lb' ? '0.01' : '1'}
+                      className="table-input donation-entry-input"
+                      type="text"
+                      inputMode="numeric"
                       value={item.unit === 'lb' ? actual.toFixed(2) : formatQuantity(actual)}
                       disabled={!editing}
                       aria-label={`${item.name} actual ${item.unit === 'lb' ? 'pounds' : 'count'}`}
-                      onChange={(event) => setActuals((current) => ({ ...current, [item.id]: Number(event.target.value) || 0 }))}
+                      onFocus={(event) => event.currentTarget.select()}
+                      onClick={(event) => event.currentTarget.select()}
+                      onChange={(event) => setActuals((current) => ({
+                        ...current,
+                        [item.id]: parseDonationEntry(event.target.value, item.unit),
+                      }))}
                     />
                   </td>
                   <td className={variance !== null && variance > 0.01 ? 'danger-text' : ''}>

@@ -117,6 +117,13 @@ export function formatQuantity(value: number): string {
     : value.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
 }
 
+export function parseDonationEntry(value: string, unit: 'lb' | 'each'): number {
+  const digits = value.replace(/\D/g, '');
+  if (!digits) return 0;
+  const quantity = Number(digits);
+  return unit === 'lb' ? quantity / 100 : quantity;
+}
+
 export function formatDuration(totalSeconds: number): string {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = Math.round(totalSeconds % 60);
