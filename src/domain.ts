@@ -24,6 +24,14 @@ export function previousDayKey(date = new Date()): string {
   return dayKey(previous);
 }
 
+export function donationWindowDayKeys(selectedDayKey: string): { current: string; previous: string } {
+  const selectedDate = new Date(`${selectedDayKey}T12:00:00`);
+  return {
+    current: selectedDayKey,
+    previous: previousDayKey(selectedDate),
+  };
+}
+
 export function detectDaypart(dayparts: DaypartConfig[], date = new Date()): DaypartId {
   const minutes = date.getHours() * 60 + date.getMinutes();
   const matching = dayparts.find((part) => minutes >= part.startMinutes && minutes < part.endMinutes);
@@ -49,6 +57,21 @@ export function cooldownProductQuantity(
 ): number | null {
   if (!timer?.active) return null;
   return Math.max(0, timer.productQuantities?.[productId] || 0);
+}
+
+export function pendingQuantityAfterServerUpdate(
+  pendingQuantity: number,
+  previousServerQuantity: number,
+  currentServerQuantity: number,
+): number {
+  const serverChange = currentServerQuantity - previousServerQuantity;
+  if (pendingQuantity > 0 && serverChange > 0) {
+    return Math.max(0, pendingQuantity - serverChange);
+  }
+  if (pendingQuantity < 0 && serverChange < 0) {
+    return Math.min(0, pendingQuantity - serverChange);
+  }
+  return pendingQuantity;
 }
 
 export function weightToPounds(value: number, unit: WeightUnit): number {

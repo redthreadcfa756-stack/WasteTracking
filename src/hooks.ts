@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { User } from 'firebase/auth';
 import { observeAuth, subscribeCooldownTimers, subscribeDiscardForDay, subscribeDonationRecord, subscribeSettings, subscribeSosForDay, subscribeWasteForDay } from './data';
 import { DEFAULT_DONATION_ITEMS, PRODUCT_TONES } from './defaults';
-import { dayKey, previousDayKey, withDerivedProductPricing } from './domain';
+import { dayKey, donationWindowDayKeys, withDerivedProductPricing } from './domain';
 import type { AppSettings, CooldownTimer, DiscardEvent, DonationRecord, MemberProfile, SosEntry, WasteEvent } from './types';
 
 export function useAuthUser() {
@@ -74,15 +74,78 @@ export function useDeviceName() {
   }, []);
 }
 
+export function useDonationDayData(storeId: string, selectedDayKey: string) {
+  const windowDays = donationWindowDayKeys(selectedDayKey);
+  const [currentWaste, setCurrentWaste] = useState<WasteEvent[]>([]);
+  const [previousWaste, setPreviousWaste] = useState<WasteEvent[]>([]);
+  const [record, setRecord] = useState<DonationRecord | null>(null);
+  const [loadedDayKey, setLoadedDayKey] = useState('');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let disposed = false;
+    let currentReady = false;
+    let previousReady = false;
+    let recordReady = false;
+    const markReady = () => {
+      if (!disposed && currentReady && previousReady && recordReady) {
+        setLoadedDayKey(selectedDayKey);
+      }
+    };
+    const handleError = (caught: { message: string }) => {
+      if (disposed) return;
+      setError(caught.message);
+      setLoadedDayKey(selectedDayKey);
+    };
+
+    setError('');
+    setCurrentWaste([]);
+    setPreviousWaste([]);
+    setRecord(null);
+
+    const subscriptions = [
+      subscribeWasteForDay(storeId, windowDays.current, (events) => {
+        if (disposed) return;
+        setCurrentWaste(events);
+        currentReady = true;
+        markReady();
+      }, handleError),
+      subscribeWasteForDay(storeId, windowDays.previous, (events) => {
+        if (disposed) return;
+        setPreviousWaste(events);
+        previousReady = true;
+        markReady();
+      }, handleError),
+      subscribeDonationRecord(storeId, windowDays.current, (nextRecord) => {
+        if (disposed) return;
+        setRecord(nextRecord);
+        recordReady = true;
+        markReady();
+      }, handleError),
+    ];
+
+    return () => {
+      disposed = true;
+      subscriptions.forEach((unsubscribe) => unsubscribe());
+    };
+  }, [storeId, selectedDayKey, windowDays.current, windowDays.previous]);
+
+  return {
+    currentWaste,
+    previousWaste,
+    record,
+    error,
+    loading: loadedDayKey !== selectedDayKey,
+    previousDayKey: windowDays.previous,
+  };
+}
+
 export function useStoreData(storeId: string | undefined, now: Date) {
   const today = dayKey(now);
-  const previous = previousDayKey(now);
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [todayWaste, setTodayWaste] = useState<WasteEvent[]>([]);
-  const [previousWaste, setPreviousWaste] = useState<WasteEvent[]>([]);
   const [discardEvents, setDiscardEvents] = useState<DiscardEvent[]>([]);
   const [sosEntries, setSosEntries] = useState<SosEntry[]>([]);
-  const [donationRecord, setDonationRecord] = useState<DonationRecord | null>(null);
   const [cooldownTimers, setCooldownTimers] = useState<CooldownTimer[]>([]);
   const [error, setError] = useState('');
   const [ready, setReady] = useState(Boolean(storeId));
@@ -120,13 +183,11 @@ export function useStoreData(storeId: string | undefined, now: Date) {
         } : value);
       }, handleError),
       subscribeWasteForDay(storeId, today, setTodayWaste, handleError),
-      subscribeWasteForDay(storeId, previous, setPreviousWaste, handleError),
       subscribeSosForDay(storeId, today, setSosEntries, handleError),
-      subscribeDonationRecord(storeId, today, setDonationRecord, handleError),
       subscribeCooldownTimers(storeId, setCooldownTimers, handleError),
     ];
     return () => subscriptions.forEach((unsubscribe) => unsubscribe());
-  }, [storeId, today, previous]);
+  }, [storeId, today]);
 
   useEffect(() => {
     if (!storeId) {
@@ -139,5 +200,5 @@ export function useStoreData(storeId: string | undefined, now: Date) {
     });
   }, [storeId, today]);
 
-  return { settings, todayWaste, previousWaste, discardEvents, sosEntries, donationRecord, cooldownTimers, error, ready, today };
+  return { settings, todayWaste, discardEvents, sosEntries, cooldownTimers, error, ready, today };
 }

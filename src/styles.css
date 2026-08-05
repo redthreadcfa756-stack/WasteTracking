@@ -399,7 +399,7 @@ code { font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.9em; }
   -webkit-overflow-scrolling: touch;
 }
 .data-table { width: 100%; min-width: 650px; border-collapse: collapse; }
-.donation-table { min-width: 880px; }
+.donation-table { min-width: 520px; }
 .admin-table { min-width: 820px; }
 .data-table th, .data-table td { padding: 0.78rem 0.65rem; text-align: left; border-bottom: 1px solid var(--line); vertical-align: middle; }
 .data-table th { color: var(--muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; white-space: nowrap; }
@@ -473,6 +473,21 @@ code { font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.9em; }
 
 .donation-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; color: var(--muted); font-size: 0.85rem; }
 .donation-toolbar > div { display: flex; gap: 0.5rem; }
+.donation-date-panel { display: flex; align-items: end; justify-content: flex-end; gap: 0.65rem; flex-wrap: wrap; }
+.donation-date-control { width: min(220px, 100%); }
+.donation-replacement-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid #e8c56e;
+  border-radius: 12px;
+  color: #654800;
+  background: #fff8df;
+}
+.donation-replacement-warning svg { width: 20px; flex: 0 0 auto; }
+.donation-replacement-warning > div { display: grid; gap: 0.2rem; }
+.donation-replacement-warning span { font-size: 0.84rem; line-height: 1.4; }
 .submit-day { justify-self: end; }
 .danger-text, .error-text { color: var(--danger) !important; }
 .form-error { margin: 0; color: var(--danger) !important; font-size: 0.83rem; }
@@ -571,6 +586,8 @@ code { font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.9em; }
   }
   .donation-toolbar { align-items: stretch; flex-direction: column; }
   .donation-toolbar > div { display: grid; }
+  .donation-date-panel { width: 100%; justify-content: stretch; }
+  .donation-date-control { width: 100%; }
   .submit-day { justify-self: stretch; }
   .activity-heading { align-items: center; }
   .activity-heading .eyebrow { display: none; }

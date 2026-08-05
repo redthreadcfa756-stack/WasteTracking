@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { COOLDOWN_PANS, DEFAULT_SETTINGS, PRODUCT_TONES } from './defaults';
-import { adjustCooldownProductQuantities, buildDonationCsv, buildWasteCsv, cooldownProductQuantity, daypartWaste, detectDaypart, distributeDollarTarget, donationPrediction, formatDurationInput, mergeActivity, parseDonationEntry, parseDuration, quantityAdjustmentFromDrag, targetCasesForProduct, targetDollarForProduct, weightToPounds, withDerivedProductPricing } from './domain';
+import { adjustCooldownProductQuantities, buildDonationCsv, buildWasteCsv, cooldownProductQuantity, daypartWaste, detectDaypart, distributeDollarTarget, donationPrediction, donationWindowDayKeys, formatDurationInput, mergeActivity, parseDonationEntry, parseDuration, pendingQuantityAfterServerUpdate, quantityAdjustmentFromDrag, targetCasesForProduct, targetDollarForProduct, weightToPounds, withDerivedProductPricing } from './domain';
 import type { CooldownTimer, DiscardEvent, DonationItemConfig, DonationRecord, WasteEvent } from './types';
 
 const event = (overrides: Partial<WasteEvent>): WasteEvent => ({
@@ -131,6 +131,14 @@ describe('domain rules', () => {
     expect(cooldownProductQuantity({ ...timer, active: false }, 'filets')).toBeNull();
   });
 
+  it('keeps rapid taps visible until the pan snapshot catches up', () => {
+    expect(pendingQuantityAfterServerUpdate(3, 4, 5)).toBe(2);
+    expect(pendingQuantityAfterServerUpdate(2, 5, 7)).toBe(0);
+    expect(pendingQuantityAfterServerUpdate(-3, 5, 4)).toBe(-2);
+    expect(pendingQuantityAfterServerUpdate(-2, 4, 2)).toBe(0);
+    expect(pendingQuantityAfterServerUpdate(2, 4, 3)).toBe(2);
+  });
+
   it('predicts donations from previous non-breakfast plus current breakfast waste', () => {
     const item: DonationItemConfig = {
       id: 'filet-total',
@@ -166,6 +174,14 @@ describe('domain rules', () => {
     expect(parseDonationEntry('12.34', 'lb')).toBe(12.34);
     expect(parseDonationEntry('', 'lb')).toBe(0);
     expect(parseDonationEntry('012', 'each')).toBe(12);
+  });
+
+  it('uses the selected donation date and its previous day for reconciliation', () => {
+    expect(donationWindowDayKeys('2026-08-04')).toEqual({
+      current: '2026-08-04',
+      previous: '2026-08-03',
+    });
+    expect(donationWindowDayKeys('2026-01-01').previous).toBe('2025-12-31');
   });
 
   it('exports net waste grouped by daypart', () => {

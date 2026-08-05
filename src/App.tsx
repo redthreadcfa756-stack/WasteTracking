@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -63,6 +64,7 @@ import {
   mergeActivity,
   parseDonationEntry,
   parseDuration,
+  pendingQuantityAfterServerUpdate,
   productWaste,
   quantityAdjustmentFromDrag,
   targetCasesForProduct,
@@ -72,13 +74,12 @@ import {
 } from './domain';
 import { createDonationWorkbook, createWasteTrendWorkbook } from './exportWorkbook';
 import { firebaseConfigured } from './firebase';
-import { useAuthUser, useDeviceName, useMember, useNow, useOnlineStatus, useStoreData } from './hooks';
+import { useAuthUser, useDeviceName, useDonationDayData, useMember, useNow, useOnlineStatus, useStoreData } from './hooks';
 import type {
   AppSettings,
   CooldownTimer,
   DaypartId,
   DiscardEvent,
-  DonationItemConfig,
   DonationRecord,
   MemberProfile,
   MenuId,
@@ -656,11 +657,8 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
         {activeTab === 'donations' && (
           <DonationsTab
             settings={settings}
-            previousWaste={storeData.previousWaste}
-            currentWaste={storeData.todayWaste}
-            existing={storeData.donationRecord}
             member={member}
-            today={storeData.today}
+            currentDay={storeData.today}
             notify={notify}
           />
         )}
@@ -787,6 +785,8 @@ function WasteTab({
   notify: (message: string) => void;
 }) {
   const [nuggetPicker, setNuggetPicker] = useState<ProductConfig | null>(null);
+  const [pendingPanQuantities, setPendingPanQuantities] = useState<Record<string, number>>({});
+  const previousServerPanQuantities = useRef<Record<string, number> | null>(null);
   const products = settings.products.filter((product) => product.menus.includes(effectiveMenu));
   const daypart = settings.dayparts.find((candidate) => candidate.id === targetDaypartId)!;
   const displayedEvents = testMode ? testEvents : events;
@@ -802,6 +802,53 @@ function WasteTab({
   const varianceDetail = Math.abs(targetVariance) < 0.005
     ? 'On target'
     : `${formatMoney(Math.abs(targetVariance))} ${targetVariance > 0 ? 'over' : 'under'} target`;
+  const serverPanQuantities = Object.fromEntries(settings.products.map((product) => {
+    const pan = COOLDOWN_PANS.find((candidate) => candidate.productIds.includes(product.id));
+    const activeTimer = pan
+      ? cooldownTimers.find((timer) => timer.id === pan.id && timer.active)
+      : undefined;
+    return [product.id, cooldownProductQuantity(activeTimer, product.id) || 0];
+  }));
+  const serverPanSignature = settings.products
+    .map((product) => `${product.id}:${serverPanQuantities[product.id] || 0}`)
+    .join('|');
+
+  useLayoutEffect(() => {
+    const previous = previousServerPanQuantities.current;
+    previousServerPanQuantities.current = serverPanQuantities;
+    if (!previous) return;
+
+    setPendingPanQuantities((current) => {
+      let changed = false;
+      const next = { ...current };
+      settings.products.forEach((product) => {
+        const productId = product.id;
+        const pending = current[productId] || 0;
+        const reconciled = pendingQuantityAfterServerUpdate(
+          pending,
+          previous[productId] || 0,
+          serverPanQuantities[productId] || 0,
+        );
+        if (reconciled === pending) return;
+        changed = true;
+        if (reconciled === 0) delete next[productId];
+        else next[productId] = reconciled;
+      });
+      return changed ? next : current;
+    });
+  }, [serverPanSignature]);
+
+  const adjustPendingPanQuantity = (productId: string, adjustment: number) => {
+    setPendingPanQuantities((current) => {
+      const nextQuantity = (current[productId] || 0) + adjustment;
+      if (nextQuantity === 0) {
+        const next = { ...current };
+        delete next[productId];
+        return next;
+      }
+      return { ...current, [productId]: nextQuantity };
+    });
+  };
 
   const adjustWaste = async (product: ProductConfig, equivalentUnits: number) => {
     const isCup = product.trackingUnit === 'cup' && Math.abs(equivalentUnits) === (product.unitsPerCup || 14);
@@ -833,10 +880,20 @@ function WasteTab({
       return;
     }
 
+    const matchingPans = COOLDOWN_PANS.filter((pan) => pan.productIds.includes(product.id));
+    const activeMatchingPan = matchingPans.some((pan) => (
+      cooldownTimers.some((timer) => timer.id === pan.id && timer.active)
+    ));
+    const optimisticallyAdjustPan = settings.cooldownTimersEnabled
+      && matchingPans.length > 0
+      && (equivalentUnits > 0 || activeMatchingPan);
+    if (optimisticallyAdjustPan) {
+      adjustPendingPanQuantity(product.id, equivalentUnits);
+    }
+
     try {
       await confirmWrite(createWasteEvent(eventData));
       if (settings.cooldownTimersEnabled) {
-        const matchingPans = COOLDOWN_PANS.filter((pan) => pan.productIds.includes(product.id));
         await confirmWrite(Promise.all(matchingPans.map((pan) => startOrJoinCooldownTimer({
           storeId: member.storeId,
           panId: pan.id,
@@ -852,6 +909,9 @@ function WasteTab({
         showWarning({ daypart: daypart.label, total: projectedCost, target: daypart.totalDollarTarget });
       }
     } catch (caught) {
+      if (optimisticallyAdjustPan) {
+        adjustPendingPanQuantity(product.id, -equivalentUnits);
+      }
       notify(errorMessage(caught));
     }
   };
@@ -952,16 +1012,20 @@ function WasteTab({
           const activeTimer = !testMode && settings.cooldownTimersEnabled && pan
             ? cooldownTimers.find((timer) => timer.id === pan.id && timer.active)
             : undefined;
+          const pendingPanQuantity = pendingPanQuantities[product.id] || 0;
+          const syncedPanUnits = cooldownProductQuantity(activeTimer, product.id);
           const currentPanUnits = testMode
             ? pan ? Math.max(0, coolDownTotals.units) : null
-            : cooldownProductQuantity(activeTimer, product.id);
+            : pendingPanQuantity !== 0
+              ? Math.max(0, (syncedPanUnits || 0) + pendingPanQuantity)
+              : syncedPanUnits;
           const currentPanLabel = testMode
             ? pan ? `${pan.label} · Test pan` : 'No cooldown pan assigned'
             : !settings.cooldownTimersEnabled
               ? 'Cooldown pans off'
               : !pan
                 ? 'No cooldown pan assigned'
-                : activeTimer ? `${pan.label} · Current pan` : `${pan.label} · Ready`;
+                : activeTimer || pendingPanQuantity > 0 ? `${pan.label} · Current pan` : `${pan.label} · Ready`;
           return (
             <div className="waste-card-wrap" key={product.id}>
               <WasteCard
@@ -1604,142 +1668,142 @@ function SosTab({ settings, entries, member, deviceName, today, initialDaypartId
   );
 }
 
-function DonationsTab({ settings, previousWaste, currentWaste, existing, member, today, notify }: {
+function DonationsTab({ settings, member, currentDay, notify }: {
   settings: AppSettings;
-  previousWaste: WasteEvent[];
-  currentWaste: WasteEvent[];
-  existing: DonationRecord | null;
   member: MemberProfile;
-  today: string;
+  currentDay: string;
   notify: (message: string) => void;
 }) {
+  const [selectedDay, setSelectedDay] = useState(currentDay);
+  const dayData = useDonationDayData(member.storeId, selectedDay);
+  const existing = dayData.record;
   const livePredictions = useMemo(() => Object.fromEntries(settings.donationItems.map((item) => [
     item.id,
-    donationPrediction(item, settings, previousWaste, currentWaste),
-  ])), [settings, previousWaste, currentWaste]);
+    donationPrediction(item, settings, dayData.previousWaste, dayData.currentWaste),
+  ])), [settings, dayData.previousWaste, dayData.currentWaste]);
   const predictions = existing?.predictions || livePredictions;
   const [actuals, setActuals] = useState<Record<string, number>>({});
-  const [editing, setEditing] = useState(!existing);
+  const [editing, setEditing] = useState(false);
   const [submitOpen, setSubmitOpen] = useState(false);
 
   useEffect(() => {
-    setActuals(existing?.actuals || Object.fromEntries(settings.donationItems.map((item) => [item.id, predictions[item.id] ?? 0])));
+    if (dayData.loading || dayData.error) return;
+    setActuals(existing?.actuals || Object.fromEntries(settings.donationItems.map((item) => [item.id, 0])));
     setEditing(!existing);
-  }, [existing, settings.donationItems, predictions]);
+    setSubmitOpen(false);
+  }, [dayData.loading, dayData.error, existing, settings.donationItems, selectedDay]);
 
-  const sourceLabel = (item: DonationItemConfig) => {
-    if (item.sourceProductIds.length === 0) return 'Manual count';
-    const previousUnits = previousWaste
-      .filter((event) => event.daypartId !== 'breakfast' && item.sourceProductIds.includes(event.productId))
-      .reduce((sum, event) => sum + event.equivalentUnits, 0);
-    const breakfastUnits = currentWaste
-      .filter((event) => event.daypartId === 'breakfast' && item.sourceProductIds.includes(event.productId))
-      .reduce((sum, event) => sum + event.equivalentUnits, 0);
-    const parts = [];
-    if (previousUnits) parts.push(`${formatQuantity(previousUnits)} prior`);
-    if (breakfastUnits) parts.push(`${formatQuantity(breakfastUnits)} today`);
-    return parts.join(' + ') || 'No tracked cool down';
-  };
-
-  const usePredictions = () => {
-    setActuals((current) => ({
-      ...current,
-      ...Object.fromEntries(settings.donationItems
-        .filter((item) => predictions[item.id] !== null)
-        .map((item) => [item.id, predictions[item.id] || 0])),
-    }));
-    notify('Tracked predictions approved; manual rows retained.');
-  };
+  const selectedDayLabel = formatDayKeyLabel(selectedDay);
 
   return (
     <section className="panel-stack">
       <div className="section-heading">
         <div>
-          <p className="eyebrow">Yesterday Lunch–Late Dinner + today Breakfast</p>
-          <h2>Donations reconciliation</h2>
+          <p className="eyebrow">Final donation totals by date</p>
+          <h2>Donation counts</h2>
         </div>
-        {existing && <span className="status-badge"><Check aria-hidden="true" /> Submitted · revision {existing.revision}</span>}
+        <div className="donation-date-panel">
+          <label className="compact-control donation-date-control">
+            Donation date
+            <input
+              type="date"
+              value={selectedDay}
+              max={currentDay}
+              onChange={(event) => setSelectedDay(event.target.value || currentDay)}
+            />
+          </label>
+          {existing && <span className="status-badge"><Check aria-hidden="true" /> Submitted · revision {existing.revision}</span>}
+        </div>
       </div>
-      <div className="donation-toolbar">
-        <span>{editing ? 'Enter weights right to left: 1, 2, 3 becomes 1.23 lb.' : `Final count by ${existing?.initials || ''}`}</span>
+      <div className="donation-replacement-warning" role="note">
+        <AlertTriangle aria-hidden="true" />
         <div>
-          {editing && <button className="secondary-button small" onClick={usePredictions}><Check /> Use tracked predictions</button>}
-          {!editing && <button className="secondary-button small" onClick={() => setEditing(true)}><RotateCcw /> Edit final count</button>}
+          <strong>Enter the complete total for {selectedDayLabel}.</strong>
+          <span>Saving again replaces that date’s previous submission. It does not add to the previous amount.</span>
         </div>
       </div>
-      <div className="data-table-wrap">
-        <table className="data-table donation-table">
-          <thead><tr><th>Donation item</th><th>Tracked source</th><th>Unit</th><th>Predicted</th><th>Actual</th><th>Variance</th></tr></thead>
-          <tbody>
-            {settings.donationItems.map((item) => {
-              const predicted = predictions[item.id];
-              const actual = actuals[item.id] || 0;
-              const variance = predicted === null ? null : actual - predicted;
-              return (
-                <tr key={item.id}>
-                  <td><strong>{item.name}</strong></td>
-                  <td>{sourceLabel(item)}</td>
-                  <td>{item.unit === 'lb' ? 'Lbs' : 'Each'}</td>
-                  <td>{predicted === null ? '—' : formatDonationNumber(predicted, item.unit)}</td>
-                  <td>
-                    <input
-                      className="table-input donation-entry-input"
-                      type="text"
-                      inputMode="numeric"
-                      value={item.unit === 'lb' ? actual.toFixed(2) : formatQuantity(actual)}
-                      disabled={!editing}
-                      aria-label={`${item.name} actual ${item.unit === 'lb' ? 'pounds' : 'count'}`}
-                      onFocus={(event) => event.currentTarget.select()}
-                      onClick={(event) => event.currentTarget.select()}
-                      onChange={(event) => setActuals((current) => ({
-                        ...current,
-                        [item.id]: parseDonationEntry(event.target.value, item.unit),
-                      }))}
-                    />
-                  </td>
-                  <td className={variance !== null && variance > 0.01 ? 'danger-text' : ''}>
-                    {variance === null ? 'Manual' : `${variance >= 0 ? '+' : ''}${formatDonationNumber(variance, item.unit)}`}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-      {editing && <button className="primary-button submit-day" onClick={() => setSubmitOpen(true)}>{existing ? 'Resubmit final count' : 'Submit final count'} <ChevronRight /></button>}
-      {submitOpen && (
-        <DonationSubmit
-          existing={existing}
-          onClose={() => setSubmitOpen(false)}
-          onSubmit={async (initials) => {
-            const variance = Object.fromEntries(settings.donationItems.map((item) => {
-              const predicted = predictions[item.id];
-              return [item.id, predicted === null ? null : (actuals[item.id] || 0) - predicted];
-            }));
-            await saveDonationRecord({
-              storeId: member.storeId,
-              dayKey: today,
-              actuals,
-              predictions,
-              units: Object.fromEntries(settings.donationItems.map((item) => [item.id, item.unit])),
-              variance,
-              initials,
-              submittedBy: member.uid,
-              submittedByName: member.displayName,
-              revision: (existing?.revision || 0) + 1,
-            });
-            setSubmitOpen(false);
-            setEditing(false);
-            notify(existing ? 'Final donation count replaced.' : 'Final donation count saved.');
-          }}
-        />
+      {dayData.error ? (
+        <div className="error-banner" role="alert">{dayData.error}</div>
+      ) : dayData.loading ? (
+        <EmptyState>Loading donation totals for {selectedDayLabel}…</EmptyState>
+      ) : (
+        <>
+          <div className="donation-toolbar">
+            <span>{editing ? 'Enter weights right to left: 1, 2, 3 becomes 1.23 lb.' : `Final total entered by ${existing?.initials || ''}`}</span>
+            {!editing && (
+              <div><button className="secondary-button small" onClick={() => setEditing(true)}><RotateCcw /> Edit this date’s total</button></div>
+            )}
+          </div>
+          <div className="data-table-wrap">
+            <table className="data-table donation-table">
+              <thead><tr><th>Donation item</th><th>Unit</th><th>Total donated</th></tr></thead>
+              <tbody>
+                {settings.donationItems.map((item) => {
+                  const actual = actuals[item.id] || 0;
+                  return (
+                    <tr key={item.id}>
+                      <td><strong>{item.name}</strong></td>
+                      <td>{item.unit === 'lb' ? 'Lbs' : 'Each'}</td>
+                      <td>
+                        <input
+                          className="table-input donation-entry-input"
+                          type="text"
+                          inputMode="numeric"
+                          value={item.unit === 'lb' ? actual.toFixed(2) : formatQuantity(actual)}
+                          disabled={!editing}
+                          aria-label={`${item.name} donated ${item.unit === 'lb' ? 'pounds' : 'count'}`}
+                          onFocus={(event) => event.currentTarget.select()}
+                          onClick={(event) => event.currentTarget.select()}
+                          onChange={(event) => setActuals((current) => ({
+                            ...current,
+                            [item.id]: parseDonationEntry(event.target.value, item.unit),
+                          }))}
+                        />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {editing && <button className="primary-button submit-day" onClick={() => setSubmitOpen(true)}>{existing ? 'Replace this date’s total' : 'Save this date’s total'} <ChevronRight /></button>}
+          {submitOpen && (
+            <DonationSubmit
+              existing={existing}
+              dayLabel={selectedDayLabel}
+              onClose={() => setSubmitOpen(false)}
+              onSubmit={async (initials) => {
+                const variance = Object.fromEntries(settings.donationItems.map((item) => {
+                  const predicted = predictions[item.id];
+                  return [item.id, predicted === null ? null : (actuals[item.id] || 0) - predicted];
+                }));
+                await saveDonationRecord({
+                  storeId: member.storeId,
+                  dayKey: selectedDay,
+                  actuals,
+                  predictions,
+                  units: Object.fromEntries(settings.donationItems.map((item) => [item.id, item.unit])),
+                  variance,
+                  initials,
+                  submittedBy: member.uid,
+                  submittedByName: member.displayName,
+                  revision: (existing?.revision || 0) + 1,
+                });
+                setSubmitOpen(false);
+                setEditing(false);
+                notify(existing ? `Donation totals for ${selectedDayLabel} replaced.` : `Donation totals for ${selectedDayLabel} saved.`);
+              }}
+            />
+          )}
+        </>
       )}
     </section>
   );
 }
 
-function DonationSubmit({ existing, onClose, onSubmit }: {
+function DonationSubmit({ existing, dayLabel, onClose, onSubmit }: {
   existing: DonationRecord | null;
+  dayLabel: string;
   onClose: () => void;
   onSubmit: (initials: string) => Promise<void>;
 }) {
@@ -1764,7 +1828,7 @@ function DonationSubmit({ existing, onClose, onSubmit }: {
   return (
     <Modal title={existing ? 'Replace final donation count' : 'Submit final donation count'} onClose={onClose}>
       <form className="modal-form" onSubmit={submit}>
-        <p>{existing ? 'This replaces the previously saved final count. No duplicate record will be created.' : 'This saves one final record for today.'}</p>
+        <p>Enter the complete total for {dayLabel}. {existing ? 'This replaces the previously saved total.' : 'This creates one final record for that date.'} It is not added to another submission.</p>
         <label>Initials<input autoFocus maxLength={5} value={initials} onChange={(event) => setInitials(event.target.value.toUpperCase())} /></label>
         {error && <p className="form-error" role="alert">{error}</p>}
         <button className="primary-button" disabled={busy}>{busy ? 'Saving…' : existing ? 'Replace final count' : 'Save final count'}</button>
@@ -2372,8 +2436,12 @@ function formatHourRange(hour: number): string {
   return `${formatMinutes(hour * 60)}–${formatMinutes((hour + 1) * 60)}`;
 }
 
-function formatDonationNumber(value: number, unit: 'lb' | 'each'): string {
-  return unit === 'lb' ? `${value.toFixed(2)} lb` : `${formatQuantity(value)} each`;
+function formatDayKeyLabel(value: string): string {
+  return new Date(`${value}T12:00:00`).toLocaleDateString([], {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
 }
 
 function productTrackingPriceLabel(product: ProductConfig): string {

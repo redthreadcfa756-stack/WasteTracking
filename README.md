@@ -62,6 +62,8 @@ Breakfast Cool Down entries use the shared four-pan timer system: grilled breakf
 
 Donation weights use calculator-style entry so typed digits fill from right to left (`1`, `2`, `3` becomes `1.23 lb`) without manually selecting the decimal value.
 
+The Donations tab presents count entry without user-facing prediction amounts. A date selector supports entering or revising prior dates, and saving again replaces that date's complete total rather than adding a duplicate submission.
+
 ## 5. Create the Cloudflare Pages project
 
 This repository uses Wrangler Direct Upload from GitHub Actions. Create a **Direct Upload** Pages project named, for example, `waste-sos-tracker`:
