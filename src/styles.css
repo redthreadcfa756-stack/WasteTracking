@@ -400,6 +400,7 @@ code { font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.9em; }
 }
 .data-table { width: 100%; min-width: 650px; border-collapse: collapse; }
 .donation-table { min-width: 520px; }
+.donation-revision-table { min-width: 760px; }
 .admin-table { min-width: 820px; }
 .data-table th, .data-table td { padding: 0.78rem 0.65rem; text-align: left; border-bottom: 1px solid var(--line); vertical-align: middle; }
 .data-table th { color: var(--muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; white-space: nowrap; }
@@ -407,6 +408,10 @@ code { font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.9em; }
 .table-input { min-width: 92px; min-height: 38px; padding: 0.45rem 0.55rem; border-radius: 9px; }
 .table-input:disabled { opacity: 1; border-color: transparent; background: transparent; }
 .donation-entry-input { text-align: right; font-variant-numeric: tabular-nums; }
+.donation-saved-value,
+.donation-new-value { min-width: 74px; justify-content: flex-end; font-variant-numeric: tabular-nums; }
+.donation-new-value { color: var(--success); }
+.donation-added-input { border-color: #d6b04d; background: #fffaf0; }
 .calculated-value { display: inline-flex; min-height: 38px; align-items: center; font-weight: 750; }
 .export-panel {
   display: grid;

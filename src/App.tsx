@@ -1683,17 +1683,25 @@ function DonationsTab({ settings, member, currentDay, notify }: {
   ])), [settings, dayData.previousWaste, dayData.currentWaste]);
   const predictions = existing?.predictions || livePredictions;
   const [actuals, setActuals] = useState<Record<string, number>>({});
+  const [addedAmounts, setAddedAmounts] = useState<Record<string, number>>({});
   const [editing, setEditing] = useState(false);
   const [submitOpen, setSubmitOpen] = useState(false);
 
   useEffect(() => {
     if (dayData.loading || dayData.error) return;
     setActuals(existing?.actuals || Object.fromEntries(settings.donationItems.map((item) => [item.id, 0])));
+    setAddedAmounts(Object.fromEntries(settings.donationItems.map((item) => [item.id, 0])));
     setEditing(!existing);
     setSubmitOpen(false);
   }, [dayData.loading, dayData.error, existing, settings.donationItems, selectedDay]);
 
   const selectedDayLabel = formatDayKeyLabel(selectedDay);
+  const submittedActuals = existing
+    ? Object.fromEntries(settings.donationItems.map((item) => [
+      item.id,
+      (existing.actuals[item.id] || 0) + (addedAmounts[item.id] || 0),
+    ]))
+    : actuals;
 
   return (
     <section className="panel-stack">
@@ -1718,8 +1726,10 @@ function DonationsTab({ settings, member, currentDay, notify }: {
       <div className="donation-replacement-warning" role="note">
         <AlertTriangle aria-hidden="true" />
         <div>
-          <strong>Enter the complete total for {selectedDayLabel}.</strong>
-          <span>Saving again replaces that date’s previous submission. It does not add to the previous amount.</span>
+          <strong>{existing ? `Add only the new donation amounts for ${selectedDayLabel}.` : `Enter the complete total for ${selectedDayLabel}.`}</strong>
+          <span>{existing
+            ? 'The system adds them to the saved amounts and stores the calculated new totals for that date.'
+            : 'If this date is updated later, the system will show the saved amounts and do the addition for you.'}</span>
         </div>
       </div>
       {dayData.error ? (
@@ -1729,44 +1739,82 @@ function DonationsTab({ settings, member, currentDay, notify }: {
       ) : (
         <>
           <div className="donation-toolbar">
-            <span>{editing ? 'Enter weights right to left: 1, 2, 3 becomes 1.23 lb.' : `Final total entered by ${existing?.initials || ''}`}</span>
+            <span>{editing
+              ? existing
+                ? 'Enter only what was added. The new total is calculated automatically.'
+                : 'Enter weights right to left: 1, 2, 3 becomes 1.23 lb.'
+              : `Final total entered by ${existing?.initials || ''}`}</span>
             {!editing && (
-              <div><button className="secondary-button small" onClick={() => setEditing(true)}><RotateCcw /> Edit this date’s total</button></div>
+              <div><button className="secondary-button small" onClick={() => setEditing(true)}><RotateCcw /> Add to this date’s total</button></div>
             )}
           </div>
           <div className="data-table-wrap">
-            <table className="data-table donation-table">
-              <thead><tr><th>Donation item</th><th>Unit</th><th>Total donated</th></tr></thead>
+            <table className={`data-table donation-table${existing ? ' donation-revision-table' : ''}`}>
+              <thead>
+                {existing ? (
+                  <tr><th>Donation item</th><th>Unit</th><th>Saved total</th><th>Amount to add</th><th>New total</th></tr>
+                ) : (
+                  <tr><th>Donation item</th><th>Unit</th><th>Total donated</th></tr>
+                )}
+              </thead>
               <tbody>
                 {settings.donationItems.map((item) => {
                   const actual = actuals[item.id] || 0;
+                  const savedAmount = existing?.actuals[item.id] || 0;
+                  const addedAmount = addedAmounts[item.id] || 0;
+                  const formatAmount = (amount: number) => (
+                    item.unit === 'lb' ? amount.toFixed(2) : formatQuantity(amount)
+                  );
                   return (
                     <tr key={item.id}>
                       <td><strong>{item.name}</strong></td>
                       <td>{item.unit === 'lb' ? 'Lbs' : 'Each'}</td>
-                      <td>
-                        <input
-                          className="table-input donation-entry-input"
-                          type="text"
-                          inputMode="numeric"
-                          value={item.unit === 'lb' ? actual.toFixed(2) : formatQuantity(actual)}
-                          disabled={!editing}
-                          aria-label={`${item.name} donated ${item.unit === 'lb' ? 'pounds' : 'count'}`}
-                          onFocus={(event) => event.currentTarget.select()}
-                          onClick={(event) => event.currentTarget.select()}
-                          onChange={(event) => setActuals((current) => ({
-                            ...current,
-                            [item.id]: parseDonationEntry(event.target.value, item.unit),
-                          }))}
-                        />
-                      </td>
+                      {existing ? (
+                        <>
+                          <td><span className="calculated-value donation-saved-value">{formatAmount(savedAmount)}</span></td>
+                          <td>
+                            <input
+                              className="table-input donation-entry-input donation-added-input"
+                              type="text"
+                              inputMode="numeric"
+                              value={formatAmount(addedAmount)}
+                              disabled={!editing}
+                              aria-label={`${item.name} additional ${item.unit === 'lb' ? 'pounds' : 'count'}`}
+                              onFocus={(event) => event.currentTarget.select()}
+                              onClick={(event) => event.currentTarget.select()}
+                              onChange={(event) => setAddedAmounts((current) => ({
+                                ...current,
+                                [item.id]: parseDonationEntry(event.target.value, item.unit),
+                              }))}
+                            />
+                          </td>
+                          <td><strong className="calculated-value donation-new-value">{formatAmount(savedAmount + addedAmount)}</strong></td>
+                        </>
+                      ) : (
+                        <td>
+                          <input
+                            className="table-input donation-entry-input"
+                            type="text"
+                            inputMode="numeric"
+                            value={formatAmount(actual)}
+                            disabled={!editing}
+                            aria-label={`${item.name} donated ${item.unit === 'lb' ? 'pounds' : 'count'}`}
+                            onFocus={(event) => event.currentTarget.select()}
+                            onClick={(event) => event.currentTarget.select()}
+                            onChange={(event) => setActuals((current) => ({
+                              ...current,
+                              [item.id]: parseDonationEntry(event.target.value, item.unit),
+                            }))}
+                          />
+                        </td>
+                      )}
                     </tr>
                   );
                 })}
               </tbody>
             </table>
           </div>
-          {editing && <button className="primary-button submit-day" onClick={() => setSubmitOpen(true)}>{existing ? 'Replace this date’s total' : 'Save this date’s total'} <ChevronRight /></button>}
+          {editing && <button className="primary-button submit-day" onClick={() => setSubmitOpen(true)}>{existing ? 'Add to this date’s total' : 'Save this date’s total'} <ChevronRight /></button>}
           {submitOpen && (
             <DonationSubmit
               existing={existing}
@@ -1775,12 +1823,12 @@ function DonationsTab({ settings, member, currentDay, notify }: {
               onSubmit={async (initials) => {
                 const variance = Object.fromEntries(settings.donationItems.map((item) => {
                   const predicted = predictions[item.id];
-                  return [item.id, predicted === null ? null : (actuals[item.id] || 0) - predicted];
+                  return [item.id, predicted === null ? null : (submittedActuals[item.id] || 0) - predicted];
                 }));
                 await saveDonationRecord({
                   storeId: member.storeId,
                   dayKey: selectedDay,
-                  actuals,
+                  actuals: submittedActuals,
                   predictions,
                   units: Object.fromEntries(settings.donationItems.map((item) => [item.id, item.unit])),
                   variance,
@@ -1791,7 +1839,7 @@ function DonationsTab({ settings, member, currentDay, notify }: {
                 });
                 setSubmitOpen(false);
                 setEditing(false);
-                notify(existing ? `Donation totals for ${selectedDayLabel} replaced.` : `Donation totals for ${selectedDayLabel} saved.`);
+                notify(existing ? `Added amounts saved to ${selectedDayLabel}.` : `Donation totals for ${selectedDayLabel} saved.`);
               }}
             />
           )}
@@ -1826,12 +1874,14 @@ function DonationSubmit({ existing, dayLabel, onClose, onSubmit }: {
     }
   };
   return (
-    <Modal title={existing ? 'Replace final donation count' : 'Submit final donation count'} onClose={onClose}>
+    <Modal title={existing ? 'Add to donation count' : 'Submit final donation count'} onClose={onClose}>
       <form className="modal-form" onSubmit={submit}>
-        <p>Enter the complete total for {dayLabel}. {existing ? 'This replaces the previously saved total.' : 'This creates one final record for that date.'} It is not added to another submission.</p>
+        <p>{existing
+          ? `The added amounts will be combined with the saved amounts for ${dayLabel}. The calculated new totals will be saved as that date’s updated record.`
+          : `This creates one final donation record for ${dayLabel}.`}</p>
         <label>Initials<input autoFocus maxLength={5} value={initials} onChange={(event) => setInitials(event.target.value.toUpperCase())} /></label>
         {error && <p className="form-error" role="alert">{error}</p>}
-        <button className="primary-button" disabled={busy}>{busy ? 'Saving…' : existing ? 'Replace final count' : 'Save final count'}</button>
+        <button className="primary-button" disabled={busy}>{busy ? 'Saving…' : existing ? 'Add and save totals' : 'Save final count'}</button>
       </form>
     </Modal>
   );
