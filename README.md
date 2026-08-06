@@ -62,7 +62,7 @@ Breakfast Cool Down entries use the shared four-pan timer system: grilled breakf
 
 Donation weights use calculator-style entry so typed digits fill from right to left (`1`, `2`, `3` becomes `1.23 lb`) without manually selecting the decimal value.
 
-The Donations tab presents count entry without user-facing prediction amounts. A date selector supports prior dates; revising a submitted date shows its saved amounts, accepts only newly added amounts, and calculates the updated totals automatically.
+The Donations tab presents count entry without user-facing prediction amounts. A date selector supports prior dates; revising a submitted date allows corrections to its saved amounts, accepts newly added amounts separately, and calculates the updated totals automatically.
 
 ## 5. Create the Cloudflare Pages project
 
