@@ -110,20 +110,14 @@ function timestampMillis(value: CooldownTimer['expiresAt']): number {
 }
 
 let cooldownAlarmAudio: HTMLAudioElement | null = null;
+let cooldownAlarmBeepUrl: string | null = null;
 let cooldownAlarmPrimed = false;
 let cooldownAlarmPrime: Promise<boolean> | null = null;
 let cooldownAlarmSequence = 0;
 let cooldownAlarmSequenceActive = false;
-let cooldownAlarmSpeechTimeout: number | null = null;
 
-function cooldownAlarmAnnouncement(panId: CooldownTimer['id']): string {
-  const panNumber = ({
-    'pan-1': 1,
-    'pan-2': 2,
-    'pan-3': 3,
-    'pan-4': 4,
-  } as const)[panId];
-  return `Pan ${panNumber} needs to be wrapped and placed in the walk-in.`;
+function cooldownAlarmAnnouncementUrl(panId: CooldownTimer['id']): string {
+  return `${import.meta.env.BASE_URL}audio/${panId}-announcement.wav`;
 }
 
 function createCooldownAlarmUrl(): string {
@@ -172,7 +166,8 @@ function createCooldownAlarmUrl(): string {
 
 function getCooldownAlarmAudio(): HTMLAudioElement {
   if (cooldownAlarmAudio) return cooldownAlarmAudio;
-  cooldownAlarmAudio = new Audio(createCooldownAlarmUrl());
+  cooldownAlarmBeepUrl = createCooldownAlarmUrl();
+  cooldownAlarmAudio = new Audio(cooldownAlarmBeepUrl);
   cooldownAlarmAudio.preload = 'auto';
   return cooldownAlarmAudio;
 }
@@ -207,13 +202,9 @@ function primeCooldownAlarm(): Promise<boolean> {
 function stopCooldownAlarm() {
   cooldownAlarmSequence += 1;
   cooldownAlarmSequenceActive = false;
-  if (cooldownAlarmSpeechTimeout !== null) {
-    window.clearTimeout(cooldownAlarmSpeechTimeout);
-    cooldownAlarmSpeechTimeout = null;
-  }
-  window.speechSynthesis?.cancel();
   if (cooldownAlarmAudio) {
     cooldownAlarmAudio.onended = null;
+    cooldownAlarmAudio.onerror = null;
     cooldownAlarmAudio.loop = false;
     cooldownAlarmAudio.pause();
     cooldownAlarmAudio.currentTime = 0;
@@ -227,31 +218,32 @@ function cooldownAlarmIsPlaying() {
 
 async function playCooldownAlarm({
   loop = false,
-  announcement,
+  panId,
 }: {
   loop?: boolean;
-  announcement?: string;
+  panId?: CooldownTimer['id'];
 } = {}): Promise<boolean> {
   try {
     if (cooldownAlarmPrime) await cooldownAlarmPrime;
     stopCooldownAlarm();
     const sequence = ++cooldownAlarmSequence;
     const audio = getCooldownAlarmAudio();
+    const beepUrl = cooldownAlarmBeepUrl || createCooldownAlarmUrl();
+    cooldownAlarmBeepUrl = beepUrl;
     audio.volume = 1;
     audio.loop = false;
     cooldownAlarmSequenceActive = true;
 
     const playTrailingBeeps = () => {
       if (sequence !== cooldownAlarmSequence) return;
-      if (cooldownAlarmSpeechTimeout !== null) {
-        window.clearTimeout(cooldownAlarmSpeechTimeout);
-        cooldownAlarmSpeechTimeout = null;
-      }
+      audio.onerror = null;
       audio.onended = loop
         ? null
         : () => {
           if (sequence === cooldownAlarmSequence) cooldownAlarmSequenceActive = false;
         };
+      audio.src = beepUrl;
+      audio.load();
       audio.currentTime = 0;
       audio.loop = loop;
       void audio.play().catch(() => {
@@ -259,9 +251,9 @@ async function playCooldownAlarm({
       });
     };
 
-    const speakThenContinue = () => {
+    const playRecordedAnnouncement = () => {
       audio.onended = null;
-      if (!announcement || !('speechSynthesis' in window) || !('SpeechSynthesisUtterance' in window)) {
+      if (!panId) {
         playTrailingBeeps();
         return;
       }
@@ -270,20 +262,21 @@ async function playCooldownAlarm({
       const finishAnnouncement = () => {
         if (finished || sequence !== cooldownAlarmSequence) return;
         finished = true;
+        audio.onended = null;
+        audio.onerror = null;
         playTrailingBeeps();
       };
-      const utterance = new SpeechSynthesisUtterance(announcement);
-      utterance.lang = 'en-US';
-      utterance.rate = 0.9;
-      utterance.volume = 1;
-      utterance.onend = finishAnnouncement;
-      utterance.onerror = finishAnnouncement;
-      cooldownAlarmSpeechTimeout = window.setTimeout(finishAnnouncement, 8_000);
-      window.speechSynthesis.cancel();
-      window.speechSynthesis.speak(utterance);
+      audio.onended = finishAnnouncement;
+      audio.onerror = finishAnnouncement;
+      audio.src = cooldownAlarmAnnouncementUrl(panId);
+      audio.load();
+      void audio.play().catch(finishAnnouncement);
     };
 
-    audio.onended = speakThenContinue;
+    audio.onended = playRecordedAnnouncement;
+    audio.onerror = null;
+    audio.src = beepUrl;
+    audio.load();
     await audio.play();
     cooldownAlarmPrimed = true;
     return true;
@@ -531,9 +524,7 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
   const expiredTimerKey = expiredTimer
     ? `${expiredTimer.id}:${timestampMillis(expiredTimer.expiresAt)}`
     : '';
-  const expiredTimerAnnouncement = expiredTimer
-    ? cooldownAlarmAnnouncement(expiredTimer.id)
-    : '';
+  const expiredTimerPanId = expiredTimer?.id;
 
   useEffect(() => {
     if (!expiredTimerKey) {
@@ -559,7 +550,7 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
       if (disposed) return;
       const played = await playCooldownAlarm({
         loop: true,
-        announcement: expiredTimerAnnouncement,
+        panId: expiredTimerPanId,
       });
       attemptInFlight = false;
       if (!disposed) setAlarmPlaybackBlocked(!played);
@@ -600,7 +591,7 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
       notify(errorMessage(caught));
       void playCooldownAlarm({
         loop: true,
-        announcement: cooldownAlarmAnnouncement(timer.id),
+        panId: timer.id,
       });
     } finally {
       setTimerActionBusy(false);
@@ -629,7 +620,7 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
       notify(errorMessage(caught));
       void playCooldownAlarm({
         loop: true,
-        announcement: cooldownAlarmAnnouncement(timer.id),
+        panId: timer.id,
       });
     } finally {
       setTimerActionBusy(false);
@@ -817,7 +808,7 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
                 alarmActionInProgress.current = false;
                 void playCooldownAlarm({
                   loop: true,
-                  announcement: cooldownAlarmAnnouncement(expiredTimer.id),
+                  panId: expiredTimer.id,
                 }).then((played) => {
                   setAlarmPlaybackBlocked(!played);
                 });
@@ -885,7 +876,9 @@ function WasteTab({
   const [nuggetPicker, setNuggetPicker] = useState<ProductConfig | null>(null);
   const [pendingPanQuantities, setPendingPanQuantities] = useState<Record<string, number>>({});
   const previousServerPanQuantities = useRef<Record<string, number> | null>(null);
-  const products = settings.products.filter((product) => product.menus.includes(effectiveMenu));
+  const products = settings.products.filter((product) => (
+    product.menus.includes(effectiveMenu) && !product.discardOnly
+  ));
   const daypart = settings.dayparts.find((candidate) => candidate.id === targetDaypartId)!;
   const displayedEvents = testMode ? testEvents : events;
   const menuEvents = displayedEvents.filter((event) => event.menu === effectiveMenu);
@@ -2314,7 +2307,7 @@ function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDay
             className="secondary-button"
             onClick={() => {
               void playCooldownAlarm({
-                announcement: cooldownAlarmAnnouncement('pan-1'),
+                panId: 'pan-1',
               }).then((played) => {
                 notify(played ? 'Alarm playback started on this device.' : 'This browser blocked alarm playback.');
               });

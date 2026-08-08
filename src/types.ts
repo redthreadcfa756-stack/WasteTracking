@@ -22,6 +22,7 @@ export interface ProductConfig {
   trackingUnit: 'each' | 'cup';
   unitsPerCup?: number;
   tone: number;
+  discardOnly?: boolean;
 }
 
 export interface DaypartConfig {

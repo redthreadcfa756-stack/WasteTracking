@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { COOLDOWN_PANS, DEFAULT_SETTINGS, PRODUCT_TONES } from './defaults';
+import { COOLDOWN_PANS, DEFAULT_PRODUCTS, DEFAULT_SETTINGS, PRODUCT_TONES } from './defaults';
 import { adjustCooldownProductQuantities, buildDailyWasteCosts, buildDonationCsv, buildWasteCsv, cooldownProductQuantity, daypartWaste, detectDaypart, distributeDollarTarget, donationPrediction, donationWindowDayKeys, formatDurationInput, mergeActivity, parseDonationEntry, parseDuration, pendingQuantityAfterServerUpdate, quantityAdjustmentFromDrag, targetCasesForProduct, targetDollarForProduct, weightToPounds, withDerivedProductPricing } from './domain';
 import type { CooldownTimer, DiscardEvent, DonationItemConfig, DonationRecord, WasteEvent } from './types';
 
@@ -43,6 +43,20 @@ describe('domain rules', () => {
     expect(panForProduct('nuggets')).toBe('pan-2');
     expect(panForProduct('breakfast-filets')).toBe('pan-3');
     expect(panForProduct('breakfast-spicy')).toBe('pan-4');
+  });
+
+  it('configures fries as a discard-only large serving measured at 6.15 ounces', () => {
+    const fries = DEFAULT_PRODUCTS.find((product) => product.id === 'fries');
+    expect(fries).toMatchObject({
+      name: 'Large fries',
+      menus: ['lunch'],
+      trackingUnit: 'each',
+      tapQuantity: 1,
+      perUnitWeight: 6.15,
+      perUnitWeightUnit: 'oz',
+      discardOnly: true,
+    });
+    expect(COOLDOWN_PANS.some((pan) => pan.productIds.includes('fries'))).toBe(false);
   });
 
   it('uses the requested daypart boundaries', () => {

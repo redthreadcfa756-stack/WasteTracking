@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { User } from 'firebase/auth';
 import { observeAuth, subscribeCooldownTimers, subscribeDiscardForDay, subscribeDonationRecord, subscribeSettings, subscribeSosForDay, subscribeWasteForDay } from './data';
-import { DEFAULT_DONATION_ITEMS, PRODUCT_TONES } from './defaults';
+import { DEFAULT_DONATION_ITEMS, DEFAULT_PRODUCTS, PRODUCT_TONES } from './defaults';
 import { dayKey, donationWindowDayKeys, withDerivedProductPricing } from './domain';
 import type { AppSettings, CooldownTimer, DiscardEvent, DonationRecord, MemberProfile, SosEntry, WasteEvent } from './types';
 
@@ -168,7 +168,14 @@ export function useStoreData(storeId: string | undefined, now: Date) {
           sosEnabled: value.sosEnabled ?? true,
           discardTrackingEnabled: value.discardTrackingEnabled ?? false,
           cardScrubEnabled: value.cardScrubEnabled ?? true,
-          products: value.products.map((product) => {
+          products: [
+            ...DEFAULT_PRODUCTS.map((defaultProduct) => (
+              value.products.find((product) => product.id === defaultProduct.id) || defaultProduct
+            )),
+            ...value.products.filter((product) => (
+              !DEFAULT_PRODUCTS.some((defaultProduct) => defaultProduct.id === product.id)
+            )),
+          ].map((product) => {
             const normalized = product.id === 'nuggets'
               ? { ...product, menus: ['breakfast', 'lunch'] as typeof product.menus }
               : product;

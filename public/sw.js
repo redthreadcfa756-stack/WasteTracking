@@ -1,5 +1,13 @@
-const CACHE = 'waste-sos-shell-v1';
-const SHELL = ['/', '/manifest.webmanifest', '/icon.svg'];
+const CACHE = 'waste-sos-shell-v2';
+const SHELL = [
+  '/',
+  '/manifest.webmanifest',
+  '/icon.svg',
+  '/audio/pan-1-announcement.wav',
+  '/audio/pan-2-announcement.wav',
+  '/audio/pan-3-announcement.wav',
+  '/audio/pan-4-announcement.wav',
+];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)));

@@ -14,12 +14,13 @@ const BASE_PRODUCTS: ProductConfig[] = [
   { id: 'strips', name: 'Strips', menus: ['lunch'], unitCost: 1.18, averageWeightLb: 0.12, tapQuantity: 1, trackingUnit: 'each', tone: 8 },
   { id: 'grilled-nuggets', name: 'Grilled nuggets', menus: ['lunch'], unitCost: 0.62, averageWeightLb: 0.04, tapQuantity: 1, trackingUnit: 'each', tone: 3 },
   { id: 'grilled-filets', name: 'Grilled filets', menus: ['lunch'], unitCost: 3.1, averageWeightLb: 0.45, tapQuantity: 1, trackingUnit: 'each', tone: 4 },
+  { id: 'fries', name: 'Large fries', menus: ['lunch'], unitCost: 0, averageWeightLb: 0.384375, perUnitWeight: 6.15, perUnitWeightUnit: 'oz', tapQuantity: 1, trackingUnit: 'each', tone: 6, discardOnly: true },
 ];
 
 export const DEFAULT_PRODUCTS: ProductConfig[] = BASE_PRODUCTS.map((product) => ({
   ...product,
-  perUnitWeight: product.averageWeightLb,
-  perUnitWeightUnit: 'lb',
+  perUnitWeight: product.perUnitWeight ?? product.averageWeightLb,
+  perUnitWeightUnit: product.perUnitWeightUnit ?? 'lb',
 }));
 
 export const PRODUCT_TONES = Object.fromEntries(
