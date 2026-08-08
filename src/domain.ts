@@ -313,6 +313,42 @@ export interface WasteTrendBucket {
   }>;
 }
 
+export interface DailyWasteCost {
+  dayKey: string;
+  totalCost: number;
+  entries: number;
+}
+
+export function buildDailyWasteCosts(
+  events: WasteEvent[],
+  startDayKey: string,
+  endDayKey: string,
+): DailyWasteCost[] {
+  const totals = new Map<string, { totalCost: number; entries: number }>();
+  events.forEach((event) => {
+    if (event.dayKey < startDayKey || event.dayKey > endDayKey) return;
+    const current = totals.get(event.dayKey) || { totalCost: 0, entries: 0 };
+    current.totalCost += event.equivalentUnits * event.unitCostSnapshot;
+    current.entries += 1;
+    totals.set(event.dayKey, current);
+  });
+
+  const days: DailyWasteCost[] = [];
+  const cursor = new Date(`${startDayKey}T12:00:00`);
+  const end = new Date(`${endDayKey}T12:00:00`);
+  while (cursor <= end) {
+    const selectedDayKey = dayKey(cursor);
+    const total = totals.get(selectedDayKey);
+    days.push({
+      dayKey: selectedDayKey,
+      totalCost: total?.totalCost || 0,
+      entries: total?.entries || 0,
+    });
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return days;
+}
+
 export function buildWasteTrend(
   events: WasteEvent[],
   settings: AppSettings,

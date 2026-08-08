@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { COOLDOWN_PANS, DEFAULT_SETTINGS, PRODUCT_TONES } from './defaults';
-import { adjustCooldownProductQuantities, buildDonationCsv, buildWasteCsv, cooldownProductQuantity, daypartWaste, detectDaypart, distributeDollarTarget, donationPrediction, donationWindowDayKeys, formatDurationInput, mergeActivity, parseDonationEntry, parseDuration, pendingQuantityAfterServerUpdate, quantityAdjustmentFromDrag, targetCasesForProduct, targetDollarForProduct, weightToPounds, withDerivedProductPricing } from './domain';
+import { adjustCooldownProductQuantities, buildDailyWasteCosts, buildDonationCsv, buildWasteCsv, cooldownProductQuantity, daypartWaste, detectDaypart, distributeDollarTarget, donationPrediction, donationWindowDayKeys, formatDurationInput, mergeActivity, parseDonationEntry, parseDuration, pendingQuantityAfterServerUpdate, quantityAdjustmentFromDrag, targetCasesForProduct, targetDollarForProduct, weightToPounds, withDerivedProductPricing } from './domain';
 import type { CooldownTimer, DiscardEvent, DonationItemConfig, DonationRecord, WasteEvent } from './types';
 
 const event = (overrides: Partial<WasteEvent>): WasteEvent => ({
@@ -198,6 +198,19 @@ describe('domain rules', () => {
       event({ id: 'b', equivalentUnits: 10, unitCostSnapshot: 2, dayKey: '2026-07-02' }),
     ], DEFAULT_SETTINGS, 'hour', '2026-07-01', '2026-07-30', 30);
     expect(csv).toContain('Product detail,Filets,1,1,YES,YES');
+  });
+
+  it('calculates raw daily waste costs across every selected calendar day', () => {
+    const daily = buildDailyWasteCosts([
+      event({ id: 'a', dayKey: '2026-07-01', equivalentUnits: 2, unitCostSnapshot: 3 }),
+      event({ id: 'b', dayKey: '2026-07-01', equivalentUnits: 1, unitCostSnapshot: 4 }),
+      event({ id: 'c', dayKey: '2026-07-03', equivalentUnits: 5, unitCostSnapshot: 2 }),
+    ], '2026-07-01', '2026-07-03');
+    expect(daily).toEqual([
+      { dayKey: '2026-07-01', totalCost: 10, entries: 2 },
+      { dayKey: '2026-07-02', totalCost: 0, entries: 0 },
+      { dayKey: '2026-07-03', totalCost: 10, entries: 1 },
+    ]);
   });
 
   it('ranks both a product’s top times and a time’s top products', () => {

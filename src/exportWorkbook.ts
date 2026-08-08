@@ -1,6 +1,6 @@
 import ExcelJS from 'exceljs';
-import type { AppSettings, DonationRecord } from './types';
-import type { WasteExportGrouping, WasteTrendBucket } from './domain';
+import type { AppSettings, DonationRecord, WasteEvent } from './types';
+import { buildDailyWasteCosts, type WasteExportGrouping, type WasteTrendBucket } from './domain';
 
 const RED = 'FFBA002E';
 const DARK = 'FF111D23';
@@ -130,6 +130,7 @@ export async function createDonationWorkbook({
 }
 
 export async function createWasteTrendWorkbook({
+  events,
   trend,
   settings,
   grouping,
@@ -138,6 +139,7 @@ export async function createWasteTrendWorkbook({
   source,
   metric,
 }: {
+  events: WasteEvent[];
   trend: WasteTrendBucket[];
   settings: AppSettings;
   grouping: WasteExportGrouping;
@@ -150,6 +152,54 @@ export async function createWasteTrendWorkbook({
   workbook.creator = 'CoolDownTracker';
   workbook.created = new Date();
   workbook.subject = 'Cool Down trend report';
+
+  const dailyCosts = buildDailyWasteCosts(events, startDayKey, endDayKey);
+  const topCostRanks = new Map(
+    [...dailyCosts]
+      .filter((day) => day.totalCost > 0)
+      .sort((a, b) => b.totalCost - a.totalCost || a.dayKey.localeCompare(b.dayKey))
+      .slice(0, 3)
+      .map((day, index) => [day.dayKey, index + 1]),
+  );
+  const daily = workbook.addWorksheet('Daily Waste Cost', {
+    views: [{ state: 'frozen', ySplit: 4, showGridLines: false }],
+  });
+  applyTitle(daily, 4, 'Daily Cool Down Cost');
+  daily.getCell('A2').value = 'Date range';
+  daily.getCell('B2').value = startDayKey;
+  daily.getCell('C2').value = endDayKey;
+  daily.getCell('A3').value = 'How to read';
+  daily.getCell('B3').value = 'Daily totals are ranked by cool down cost. The three highest-cost days are highlighted yellow regardless of the Product by Time metric.';
+  daily.mergeCells('B3:D3');
+  daily.getCell('B3').alignment = { wrapText: true, vertical: 'middle' };
+  daily.getRow(3).height = 30;
+  daily.getRow(4).values = ['Date', 'Total Cool Down Cost', 'Logged Entries', 'Cost Rank'];
+  applyHeader(daily.getRow(4));
+
+  dailyCosts.forEach((day, index) => {
+    const rowNumber = index + 5;
+    const row = daily.getRow(rowNumber);
+    const rank = topCostRanks.get(day.dayKey);
+    daily.getCell(rowNumber, 1).value = new Date(`${day.dayKey}T12:00:00`);
+    daily.getCell(rowNumber, 1).numFmt = 'm-d-yy';
+    daily.getCell(rowNumber, 2).value = day.totalCost;
+    daily.getCell(rowNumber, 2).numFmt = '$0.00';
+    daily.getCell(rowNumber, 3).value = day.entries;
+    daily.getCell(rowNumber, 4).value = rank || null;
+    if (index % 2 === 1) {
+      row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: PALE_BLUE } };
+    }
+    if (rank) {
+      row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: YELLOW } };
+      row.font = { bold: true, color: { argb: DARK } };
+    }
+  });
+  const lastDailyRow = Math.max(4, dailyCosts.length + 4);
+  daily.autoFilter = { from: 'A4', to: `D${lastDailyRow}` };
+  daily.getColumn(1).width = 16;
+  daily.getColumn(2).width = 24;
+  daily.getColumn(3).width = 18;
+  daily.getColumn(4).width = 14;
 
   const productNames = settings.products.map((product) => product.name);
   const labels = timeLabels(settings, grouping);
