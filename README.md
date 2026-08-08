@@ -60,6 +60,8 @@ Admin can configure case cost, case weight, and per-unit weights in ounces, poun
 
 Breakfast Cool Down entries use the shared four-pan timer system: grilled breakfast items and eggs use Pan 1, nuggets use Pan 2, breakfast filets use Pan 3, and breakfast spicy uses Pan 4.
 
+Expired-pan alarms are suppressed while the Donations or Admin tab is open. If the pan is still expired after returning to an operational tab, the alarm is presented then. Alarm audio is primed silently, and online startup waits for Firestore to confirm timer state so stale cached timers cannot produce false alarms.
+
 Donation weights use calculator-style entry so typed digits fill from right to left (`1`, `2`, `3` becomes `1.23 lb`) without manually selecting the decimal value.
 
 The Donations tab presents count entry without user-facing prediction amounts. A date selector supports prior dates; revising a submitted date allows corrections to its saved amounts, accepts newly added amounts separately, and calculates the updated totals automatically.

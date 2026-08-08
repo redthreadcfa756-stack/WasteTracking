@@ -147,6 +147,7 @@ export function useStoreData(storeId: string | undefined, now: Date) {
   const [discardEvents, setDiscardEvents] = useState<DiscardEvent[]>([]);
   const [sosEntries, setSosEntries] = useState<SosEntry[]>([]);
   const [cooldownTimers, setCooldownTimers] = useState<CooldownTimer[]>([]);
+  const [cooldownTimersSynced, setCooldownTimersSynced] = useState(false);
   const [error, setError] = useState('');
   const [ready, setReady] = useState(Boolean(storeId));
 
@@ -154,6 +155,7 @@ export function useStoreData(storeId: string | undefined, now: Date) {
     if (!storeId) return;
     setError('');
     setReady(true);
+    setCooldownTimersSynced(false);
     const handleError = (caught: { message: string }) => {
       setError(caught.message);
       setReady(true);
@@ -184,7 +186,10 @@ export function useStoreData(storeId: string | undefined, now: Date) {
       }, handleError),
       subscribeWasteForDay(storeId, today, setTodayWaste, handleError),
       subscribeSosForDay(storeId, today, setSosEntries, handleError),
-      subscribeCooldownTimers(storeId, setCooldownTimers, handleError),
+      subscribeCooldownTimers(storeId, (timers, serverConfirmed) => {
+        setCooldownTimers(timers);
+        if (serverConfirmed) setCooldownTimersSynced(true);
+      }, handleError),
     ];
     return () => subscriptions.forEach((unsubscribe) => unsubscribe());
   }, [storeId, today]);
@@ -200,5 +205,5 @@ export function useStoreData(storeId: string | undefined, now: Date) {
     });
   }, [storeId, today]);
 
-  return { settings, todayWaste, discardEvents, sosEntries, cooldownTimers, error, ready, today };
+  return { settings, todayWaste, discardEvents, sosEntries, cooldownTimers, cooldownTimersSynced, error, ready, today };
 }

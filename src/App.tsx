@@ -173,9 +173,9 @@ function primeCooldownAlarm(): Promise<boolean> {
   if (cooldownAlarmPrime) return cooldownAlarmPrime;
 
   const audio = getCooldownAlarmAudio();
-  const previousVolume = audio.volume;
+  const previousMuted = audio.muted;
   audio.loop = false;
-  audio.volume = 0.001;
+  audio.muted = true;
   cooldownAlarmPrime = audio.play()
     .then(() => {
       audio.pause();
@@ -185,7 +185,7 @@ function primeCooldownAlarm(): Promise<boolean> {
     })
     .catch(() => false)
     .finally(() => {
-      audio.volume = previousVolume || 1;
+      audio.muted = previousMuted;
       cooldownAlarmPrime = null;
     });
   return cooldownAlarmPrime;
@@ -442,8 +442,16 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
   }, []);
 
   const testDaypartActive = testDaypartEnabled && activeTab === 'waste';
-  const expiredTimer = settings.cooldownTimersEnabled && !testDaypartActive
-    ? storeData.cooldownTimers.find((timer) => timer.active && timestampMillis(timer.expiresAt) <= timerNow)
+  const cooldownAlarmSuppressed = activeTab === 'donations' || activeTab === 'admin';
+  const cooldownTimersReadyForAlarm = storeData.cooldownTimersSynced || !online;
+  const expiredTimer = settings.cooldownTimersEnabled
+    && cooldownTimersReadyForAlarm
+    && !testDaypartActive
+    && !cooldownAlarmSuppressed
+    ? storeData.cooldownTimers.find((timer) => {
+      const expiration = timestampMillis(timer.expiresAt);
+      return timer.active && expiration > 0 && expiration <= timerNow;
+    })
     : undefined;
   const expiredTimerKey = expiredTimer
     ? `${expiredTimer.id}:${timestampMillis(expiredTimer.expiresAt)}`

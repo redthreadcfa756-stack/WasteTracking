@@ -130,16 +130,24 @@ export async function createWasteEvent(event: Omit<WasteEvent, 'id' | 'eventAt'>
 
 export function subscribeCooldownTimers(
   storeId: string,
-  callback: (timers: CooldownTimer[]) => void,
+  callback: (timers: CooldownTimer[], serverConfirmed: boolean) => void,
   onError: (error: FirestoreError) => void,
 ): Unsubscribe {
   const services = requireFirebase();
-  return onSnapshot(collection(services.db, 'stores', storeId, 'cooldownTimers'), (snapshot) => {
-    callback(snapshot.docs.map((timerDoc) => ({
-      id: timerDoc.id,
-      ...timerDoc.data(),
-    } as CooldownTimer)));
-  }, onError);
+  return onSnapshot(
+    collection(services.db, 'stores', storeId, 'cooldownTimers'),
+    { includeMetadataChanges: true },
+    (snapshot) => {
+      callback(
+        snapshot.docs.map((timerDoc) => ({
+          id: timerDoc.id,
+          ...timerDoc.data(),
+        } as CooldownTimer)),
+        !snapshot.metadata.fromCache && !snapshot.metadata.hasPendingWrites,
+      );
+    },
+    onError,
+  );
 }
 
 export async function startOrJoinCooldownTimer({
