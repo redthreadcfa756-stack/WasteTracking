@@ -89,6 +89,7 @@ describe('domain rules', () => {
     expect(DEFAULT_SETTINGS.sosEnabled).toBe(true);
     expect(DEFAULT_SETTINGS.discardTrackingEnabled).toBe(false);
     expect(DEFAULT_SETTINGS.cardScrubEnabled).toBe(true);
+    expect(DEFAULT_SETTINGS.alarmVoiceVolume).toBe(1);
   });
 
   it('maps card drags to signed quantities with a center dead zone', () => {

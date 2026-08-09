@@ -105,6 +105,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   sosEnabled: true,
   discardTrackingEnabled: false,
   cardScrubEnabled: true,
+  alarmVoiceVolume: 1,
   products: DEFAULT_PRODUCTS,
   dayparts: DEFAULT_DAYPARTS,
   donationItems: DEFAULT_DONATION_ITEMS,

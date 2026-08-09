@@ -219,9 +219,11 @@ function cooldownAlarmIsPlaying() {
 async function playCooldownAlarm({
   loop = false,
   panId,
+  voiceVolume = 1,
 }: {
   loop?: boolean;
   panId?: CooldownTimer['id'];
+  voiceVolume?: number;
 } = {}): Promise<boolean> {
   try {
     if (cooldownAlarmPrime) await cooldownAlarmPrime;
@@ -229,6 +231,7 @@ async function playCooldownAlarm({
     const sequence = ++cooldownAlarmSequence;
     const audio = getCooldownAlarmAudio();
     const beepUrl = cooldownAlarmBeepUrl || createCooldownAlarmUrl();
+    const normalizedVoiceVolume = Math.max(0, Math.min(1, voiceVolume));
     cooldownAlarmBeepUrl = beepUrl;
     audio.volume = 1;
     audio.loop = false;
@@ -245,6 +248,7 @@ async function playCooldownAlarm({
       audio.src = beepUrl;
       audio.load();
       audio.currentTime = 0;
+      audio.volume = 1;
       audio.loop = loop;
       void audio.play().catch(() => {
         if (sequence === cooldownAlarmSequence) cooldownAlarmSequenceActive = false;
@@ -270,6 +274,7 @@ async function playCooldownAlarm({
       audio.onerror = finishAnnouncement;
       audio.src = cooldownAlarmAnnouncementUrl(panId);
       audio.load();
+      audio.volume = normalizedVoiceVolume;
       void audio.play().catch(finishAnnouncement);
     };
 
@@ -551,6 +556,7 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
       const played = await playCooldownAlarm({
         loop: true,
         panId: expiredTimerPanId,
+        voiceVolume: settings.alarmVoiceVolume,
       });
       attemptInFlight = false;
       if (!disposed) setAlarmPlaybackBlocked(!played);
@@ -592,6 +598,7 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
       void playCooldownAlarm({
         loop: true,
         panId: timer.id,
+        voiceVolume: settings.alarmVoiceVolume,
       });
     } finally {
       setTimerActionBusy(false);
@@ -621,6 +628,7 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
       void playCooldownAlarm({
         loop: true,
         panId: timer.id,
+        voiceVolume: settings.alarmVoiceVolume,
       });
     } finally {
       setTimerActionBusy(false);
@@ -809,6 +817,7 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
                 void playCooldownAlarm({
                   loop: true,
                   panId: expiredTimer.id,
+                  voiceVolume: settings.alarmVoiceVolume,
                 }).then((played) => {
                   setAlarmPlaybackBlocked(!played);
                 });
@@ -2302,12 +2311,32 @@ function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDay
             <strong>Cooldown alarm</strong>
             <small>This device only · Beeps, Pan 1 voice announcement, then beeps</small>
           </span>
+          <label className="alarm-volume-control">
+            <span>
+              <strong>Voice volume</strong>
+              <output>{Math.round(draft.alarmVoiceVolume * 100)}%</output>
+            </span>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              step="5"
+              value={Math.round(draft.alarmVoiceVolume * 100)}
+              onChange={(event) => setDraft((current) => ({
+                ...current,
+                alarmVoiceVolume: Number(event.target.value) / 100,
+              }))}
+              aria-label="Voice announcement volume"
+            />
+            <small>Shared across every device after Save all changes · Beep volume is unchanged</small>
+          </label>
           <button
             type="button"
             className="secondary-button"
             onClick={() => {
               void playCooldownAlarm({
                 panId: 'pan-1',
+                voiceVolume: draft.alarmVoiceVolume,
               }).then((played) => {
                 notify(played ? 'Alarm playback started on this device.' : 'This browser blocked alarm playback.');
               });

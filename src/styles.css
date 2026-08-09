@@ -388,6 +388,16 @@ code { font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.9em; }
   border-color: var(--line);
   background: var(--panel);
 }
+.alarm-volume-control {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.65rem;
+  background: var(--panel);
+}
+.alarm-volume-control > span { display: flex; justify-content: space-between; gap: 1rem; }
+.alarm-volume-control output { color: var(--red); font-weight: 800; font-variant-numeric: tabular-nums; }
+.alarm-volume-control input { width: 100%; min-height: 28px; padding: 0; accent-color: var(--red); }
+.alarm-volume-control small { color: var(--muted); font-size: 0.72rem; line-height: 1.35; }
 .full-row { grid-column: 1 / -1; }
 
 .data-table-wrap {

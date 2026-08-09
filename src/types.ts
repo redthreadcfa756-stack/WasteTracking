@@ -49,6 +49,7 @@ export interface AppSettings {
   sosEnabled: boolean;
   discardTrackingEnabled: boolean;
   cardScrubEnabled: boolean;
+  alarmVoiceVolume: number;
   products: ProductConfig[];
   dayparts: DaypartConfig[];
   donationItems: DonationItemConfig[];

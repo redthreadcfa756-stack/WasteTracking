@@ -1,4 +1,4 @@
-const CACHE = 'waste-sos-shell-v2';
+const CACHE = 'waste-sos-shell-v3';
 const SHELL = [
   '/',
   '/manifest.webmanifest',

@@ -62,7 +62,7 @@ Breakfast Cool Down entries use the shared four-pan timer system: grilled breakf
 
 Expired-pan alarms sound an initial set of beeps, announce which pan needs to be wrapped and placed in the walk-in, and then continue beeping. They are suppressed while the Donations or Admin tab is open. If the pan is still expired after returning to an operational tab, the alarm is presented then. Alarm audio is primed silently, and online startup waits for Firestore to confirm timer state so stale cached timers cannot produce false alarms.
 
-Pan announcements use bundled prerecorded audio so every device hears the same voice without relying on browser speech synthesis.
+Pan announcements use loudness-normalized bundled recordings so every device hears the same voice without relying on browser speech synthesis. Admin can set the shared voice-announcement volume independently of the beep volume.
 
 Donation weights use calculator-style entry so typed digits fill from right to left (`1`, `2`, `3` becomes `1.23 lb`) without manually selecting the decimal value.
 

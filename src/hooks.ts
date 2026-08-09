@@ -168,6 +168,7 @@ export function useStoreData(storeId: string | undefined, now: Date) {
           sosEnabled: value.sosEnabled ?? true,
           discardTrackingEnabled: value.discardTrackingEnabled ?? false,
           cardScrubEnabled: value.cardScrubEnabled ?? true,
+          alarmVoiceVolume: value.alarmVoiceVolume ?? 1,
           products: [
             ...DEFAULT_PRODUCTS.map((defaultProduct) => (
               value.products.find((product) => product.id === defaultProduct.id) || defaultProduct
