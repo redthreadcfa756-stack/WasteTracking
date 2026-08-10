@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { User } from 'firebase/auth';
-import { observeAuth, subscribeCooldownTimers, subscribeDiscardForDay, subscribeDonationRecord, subscribeSettings, subscribeSosForDay, subscribeWasteForDay } from './data';
+import { observeAuth, subscribeCooldownTimers, subscribeDiscardForDay, subscribeDonationRecord, subscribeSettings, subscribeSosForDay, subscribeWasteForDateRange, subscribeWasteForDay } from './data';
 import { DEFAULT_DONATION_ITEMS, DEFAULT_PRODUCTS, PRODUCT_TONES } from './defaults';
 import { dayKey, donationWindowDayKeys, withDerivedProductPricing } from './domain';
 import type { AppSettings, CooldownTimer, DiscardEvent, DonationRecord, MemberProfile, SosEntry, WasteEvent } from './types';
@@ -142,8 +142,10 @@ export function useDonationDayData(storeId: string, selectedDayKey: string) {
 
 export function useStoreData(storeId: string | undefined, now: Date) {
   const today = dayKey(now);
+  const monthStart = dayKey(new Date(now.getFullYear(), now.getMonth(), 1, 12));
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [todayWaste, setTodayWaste] = useState<WasteEvent[]>([]);
+  const [monthToDateWaste, setMonthToDateWaste] = useState<WasteEvent[]>([]);
   const [discardEvents, setDiscardEvents] = useState<DiscardEvent[]>([]);
   const [sosEntries, setSosEntries] = useState<SosEntry[]>([]);
   const [cooldownTimers, setCooldownTimers] = useState<CooldownTimer[]>([]);
@@ -193,6 +195,7 @@ export function useStoreData(storeId: string | undefined, now: Date) {
         } : value);
       }, handleError),
       subscribeWasteForDay(storeId, today, setTodayWaste, handleError),
+      subscribeWasteForDateRange(storeId, monthStart, today, setMonthToDateWaste, handleError),
       subscribeSosForDay(storeId, today, setSosEntries, handleError),
       subscribeCooldownTimers(storeId, (timers, serverConfirmed) => {
         setCooldownTimers(timers);
@@ -200,7 +203,7 @@ export function useStoreData(storeId: string | undefined, now: Date) {
       }, handleError),
     ];
     return () => subscriptions.forEach((unsubscribe) => unsubscribe());
-  }, [storeId, today]);
+  }, [storeId, today, monthStart]);
 
   useEffect(() => {
     if (!storeId) {
@@ -213,5 +216,17 @@ export function useStoreData(storeId: string | undefined, now: Date) {
     });
   }, [storeId, today]);
 
-  return { settings, todayWaste, discardEvents, sosEntries, cooldownTimers, cooldownTimersSynced, error, ready, today };
+  return {
+    settings,
+    todayWaste,
+    monthToDateWaste,
+    monthStart,
+    discardEvents,
+    sosEntries,
+    cooldownTimers,
+    cooldownTimersSynced,
+    error,
+    ready,
+    today,
+  };
 }

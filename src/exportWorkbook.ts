@@ -2,8 +2,8 @@ import ExcelJS from 'exceljs';
 import type { AppSettings, DonationRecord, WasteEvent } from './types';
 import {
   buildDaypartTopWasteItems,
-  buildDailyWasteCosts,
   buildProductCaseProjections,
+  buildWeekdayWasteCosts,
   type WasteExportGrouping,
   type WasteTrendBucket,
 } from './domain';
@@ -159,39 +159,45 @@ export async function createWasteTrendWorkbook({
   workbook.created = new Date();
   workbook.subject = 'Cool Down trend report';
 
-  const dailyCosts = buildDailyWasteCosts(events, startDayKey, endDayKey);
+  const weekdayCosts = buildWeekdayWasteCosts(events, startDayKey, endDayKey);
   const daypartTopWaste = buildDaypartTopWasteItems(events, settings, startDayKey, endDayKey);
   const topCostRanks = new Map(
-    [...dailyCosts]
-      .filter((day) => day.totalCost > 0)
-      .sort((a, b) => b.totalCost - a.totalCost || a.dayKey.localeCompare(b.dayKey))
+    [...weekdayCosts]
+      .filter((day) => day.averageCost > 0)
+      .sort((a, b) => b.averageCost - a.averageCost || a.weekday - b.weekday)
       .slice(0, 3)
-      .map((day, index) => [day.dayKey, index + 1]),
+      .map((day, index) => [day.weekday, index + 1]),
   );
   const daily = workbook.addWorksheet('Daily Waste Cost', {
     views: [{ state: 'frozen', ySplit: 4, showGridLines: false }],
   });
-  applyTitle(daily, 4, 'Daily Waste Cost');
+  applyTitle(daily, 4, 'Average Waste Cost by Weekday');
   daily.getCell('A2').value = 'Date range';
   daily.getCell('B2').value = startDayKey;
   daily.getCell('C2').value = endDayKey;
   daily.getCell('A3').value = 'How to read';
-  daily.getCell('B3').value = 'Monday–Saturday totals are ranked by cool down cost. The three highest-cost days are highlighted yellow. Highest contributing items use net product cost for the day or selected-period daypart.';
+  daily.getCell('B3').value = 'Each Monday–Saturday weekday appears once. Repeated weekdays are averaged together, including zero-waste dates. The three highest average-cost weekdays are highlighted yellow. Highest contributing items use net product cost across that weekday or selected-period daypart.';
   daily.mergeCells('B3:D3');
   daily.getCell('B3').alignment = { wrapText: true, vertical: 'middle' };
   daily.getRow(3).height = 30;
-  daily.getRow(4).values = ['Day', 'Date', 'Total Cost', 'Highest Contributing Item'];
+  daily.getRow(4).values = ['Day', 'Dates Averaged', 'Average Cost', 'Highest Contributing Item'];
   applyHeader(daily.getRow(4));
 
-  dailyCosts.forEach((day, index) => {
+  const compactDate = (selectedDayKey: string) => {
+    const [year, month, selectedDay] = selectedDayKey.split('-');
+    return `${Number(month)}/${Number(selectedDay)}/${year.slice(2)}`;
+  };
+  weekdayCosts.forEach((day, index) => {
     const rowNumber = index + 5;
     const row = daily.getRow(rowNumber);
-    const rank = topCostRanks.get(day.dayKey);
-    const date = new Date(`${day.dayKey}T12:00:00`);
-    daily.getCell(rowNumber, 1).value = date.toLocaleDateString('en-US', { weekday: 'long' });
-    daily.getCell(rowNumber, 2).value = date;
-    daily.getCell(rowNumber, 2).numFmt = 'm-d-yy';
-    daily.getCell(rowNumber, 3).value = day.totalCost;
+    const rank = topCostRanks.get(day.weekday);
+    const firstDate = compactDate(day.dayKeys[0]);
+    const lastDate = compactDate(day.dayKeys[day.dayKeys.length - 1]);
+    daily.getCell(rowNumber, 1).value = day.dayLabel;
+    daily.getCell(rowNumber, 2).value = day.occurrenceCount === 1
+      ? firstDate
+      : `${day.occurrenceCount} dates: ${firstDate}–${lastDate}`;
+    daily.getCell(rowNumber, 3).value = day.averageCost;
     daily.getCell(rowNumber, 3).numFmt = '$0.00';
     daily.getCell(rowNumber, 4).value = day.highestContributingItem || '—';
     if (index % 2 === 1) {
@@ -202,7 +208,7 @@ export async function createWasteTrendWorkbook({
       row.font = { bold: true, color: { argb: DARK } };
     }
   });
-  const lastDailyRow = Math.max(4, dailyCosts.length + 4);
+  const lastDailyRow = Math.max(4, weekdayCosts.length + 4);
   daily.autoFilter = { from: 'A4', to: `D${lastDailyRow}` };
   const daypartTitleRow = lastDailyRow + 2;
   const daypartHeaderRow = daypartTitleRow + 1;
@@ -228,7 +234,7 @@ export async function createWasteTrendWorkbook({
     }
   });
   daily.getColumn(1).width = 16;
-  daily.getColumn(2).width = 24;
+  daily.getColumn(2).width = 30;
   daily.getColumn(3).width = 18;
   daily.getColumn(4).width = 28;
 

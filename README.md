@@ -60,6 +60,8 @@ Admin can configure case cost, case weight, and per-unit weights in ounces, poun
 
 Breakfast Cool Down entries use the shared four-pan timer system: grilled breakfast items and eggs use Pan 1, nuggets use Pan 2, breakfast filets use Pan 3, and breakfast spicy uses Pan 4.
 
+Below Recent Activity, the Cool Down page shows the live month-to-date highest-cost product for every daypart. The summary uses net Cool Down dollars, excludes Sundays, and updates from the same Firestore `wasteEvents` data used by the export.
+
 Expired-pan alarms sound an initial set of beeps, announce which pan needs to be wrapped and placed in the walk-in, and then continue beeping. They are suppressed while the Donations or Admin tab is open. If the pan is still expired after returning to an operational tab, the alarm is presented then. Alarm audio is primed silently, and online startup waits for Firestore to confirm timer state so stale cached timers cannot produce false alarms.
 
 Pan announcements use loudness-normalized bundled recordings so every device hears the same voice without relying on browser speech synthesis. Admin can set the shared voice-announcement volume independently of the beep volume.
@@ -70,7 +72,7 @@ The Donations tab presents count entry without user-facing prediction amounts. A
 
 Cool down exports support selected-day, week-to-date, previous-week, month-to-date, rolling-range, and custom date options. Business weeks run Monday through Saturday, and Sundays are excluded from cool down export data and operating-day calculations.
 
-Every cool down workbook includes a Daily Waste Cost sheet with day, date, total cost, and highest contributing item. It highlights the three highest total-cost days and lists the highest-cost wasted item in each daypart across the selected period, regardless of whether the Product by Time matrix uses units or dollars. The Product by Time sheet keeps its existing averages and adds projected cases per operating day, six-day business week, and calendar month. Case projections use total net quantity across the selected range divided by every Monday–Saturday day, including zero-entry days; the monthly run rate uses the exact number of Monday–Saturday days in the ending date’s month.
+Every cool down workbook includes a Daily Waste Cost sheet that displays Monday through Saturday once. When the selected range contains repeated weekdays, their costs are averaged together with zero-waste dates included; the sheet lists the dates averaged and the highest contributing item, highlights the three highest average-cost weekdays, and lists the highest-cost wasted item in each daypart across the selected period. This behavior is independent of whether the Product by Time matrix uses units or dollars. The Product by Time sheet keeps its existing averages and adds projected cases per operating day, six-day business week, and calendar month. Case projections use total net quantity across the selected range divided by every Monday–Saturday day, including zero-entry days; the monthly run rate uses the exact number of Monday–Saturday days in the ending date’s month.
 
 The Discard tab includes Large fries as a discard-only product counted by serving. Its default per-serving weight is 6.15 ounces, the midpoint of the 5.6–6.7 ounce range, for optional admin pricing calculations.
 

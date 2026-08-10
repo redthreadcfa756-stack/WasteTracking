@@ -50,6 +50,7 @@ import {
 } from './data';
 import { COOLDOWN_PANS, DEFAULT_SETTINGS } from './defaults';
 import {
+  buildDaypartTopWasteItems,
   daypartWaste,
   dayKey,
   cooldownProductQuantity,
@@ -509,17 +510,22 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
   }, [activeTab, settings.sosEnabled, settings.discardTrackingEnabled]);
 
   useEffect(() => {
-    const primeAudio = () => void primeCooldownAlarm();
+    if (activeTab === 'donations' || activeTab === 'admin' || adminPrompt) return;
+    const primeAudio = (event: Event) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest('[data-suppresses-cooldown-alarm="true"]')) return;
+      void primeCooldownAlarm();
+    };
     window.addEventListener('pointerdown', primeAudio);
     window.addEventListener('keydown', primeAudio);
     return () => {
       window.removeEventListener('pointerdown', primeAudio);
       window.removeEventListener('keydown', primeAudio);
     };
-  }, []);
+  }, [activeTab, adminPrompt]);
 
   const testDaypartActive = testDaypartEnabled && activeTab === 'waste';
-  const cooldownAlarmSuppressed = activeTab === 'donations' || activeTab === 'admin';
+  const cooldownAlarmSuppressed = activeTab === 'donations' || activeTab === 'admin' || adminPrompt;
   const cooldownTimersReadyForAlarm = storeData.cooldownTimersSynced || !online;
   const expiredTimer = settings.cooldownTimersEnabled
     && cooldownTimersReadyForAlarm
@@ -547,16 +553,21 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
     navigator.vibrate?.([300, 150, 300, 150, 600]);
     let disposed = false;
     let attemptInFlight = false;
-    const attemptAlarm = async () => {
+    const attemptAlarm = async (event?: Event) => {
+      const target = event?.target;
       if (
         disposed
+        || (target instanceof Element && Boolean(target.closest('[data-suppresses-cooldown-alarm="true"]')))
         || attemptInFlight
         || alarmActionInProgress.current
         || cooldownAlarmSequenceActive
       ) return;
       attemptInFlight = true;
       if (cooldownAlarmPrime) await cooldownAlarmPrime;
-      if (disposed) return;
+      if (disposed || alarmActionInProgress.current) {
+        attemptInFlight = false;
+        return;
+      }
       const played = await playCooldownAlarm({
         loop: true,
         panId: expiredTimerPanId,
@@ -639,12 +650,20 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
     }
   };
 
+  const silenceCooldownAlarmForNavigation = () => {
+    if (expiredTimerKey) alarmActionInProgress.current = true;
+    stopCooldownAlarm();
+    setAlarmPlaybackBlocked(false);
+  };
+
   const selectTab = (tab: TabId) => {
     if (tab === activeTab) return;
     if (tab === 'admin') {
+      silenceCooldownAlarmForNavigation();
       setAdminPrompt(true);
       return;
     }
+    if (tab === 'donations') silenceCooldownAlarmForNavigation();
     setActiveTab(tab);
   };
 
@@ -697,7 +716,16 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
         style={{ gridTemplateColumns: `repeat(${visibleTabs.length}, minmax(0, 1fr))` }}
       >
         {visibleTabs.map(({ id, label, icon: Icon }) => (
-          <button key={id} className={activeTab === id ? 'active' : ''} onClick={() => selectTab(id)} aria-current={activeTab === id ? 'page' : undefined}>
+          <button
+            key={id}
+            className={activeTab === id ? 'active' : ''}
+            data-suppresses-cooldown-alarm={id === 'admin' || id === 'donations' ? 'true' : undefined}
+            onPointerDown={() => {
+              if (id === 'admin' || id === 'donations') silenceCooldownAlarmForNavigation();
+            }}
+            onClick={() => selectTab(id)}
+            aria-current={activeTab === id ? 'page' : undefined}
+          >
             <Icon aria-hidden="true" />
             <span>{label}</span>
           </button>
@@ -709,6 +737,9 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
           <WasteTab
             settings={settings}
             events={storeData.todayWaste}
+            monthToDateEvents={storeData.monthToDateWaste}
+            monthStartDayKey={storeData.monthStart}
+            monthEndDayKey={storeData.today}
             discardEvents={storeData.discardEvents}
             cooldownTimers={storeData.cooldownTimers}
             testMode={testDaypartEnabled}
@@ -779,8 +810,12 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
 
       {adminPrompt && (
         <AdminUnlock
-          onClose={() => setAdminPrompt(false)}
+          onClose={() => {
+            stopCooldownAlarm();
+            setAdminPrompt(false);
+          }}
           onUnlocked={() => {
+            stopCooldownAlarm();
             setAdminPrompt(false);
             setActiveTab('admin');
           }}
@@ -854,6 +889,9 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
 function WasteTab({
   settings,
   events,
+  monthToDateEvents,
+  monthStartDayKey,
+  monthEndDayKey,
   discardEvents,
   cooldownTimers,
   testMode,
@@ -871,6 +909,9 @@ function WasteTab({
 }: {
   settings: AppSettings;
   events: WasteEvent[];
+  monthToDateEvents: WasteEvent[];
+  monthStartDayKey: string;
+  monthEndDayKey: string;
   discardEvents: DiscardEvent[];
   cooldownTimers: CooldownTimer[];
   testMode: boolean;
@@ -893,6 +934,16 @@ function WasteTab({
     product.menus.includes(effectiveMenu) && !product.discardOnly
   ));
   const daypart = settings.dayparts.find((candidate) => candidate.id === targetDaypartId)!;
+  const monthToDateTopWaste = buildDaypartTopWasteItems(
+    monthToDateEvents,
+    settings,
+    monthStartDayKey,
+    monthEndDayKey,
+  );
+  const monthToDateLabel = new Date(`${monthStartDayKey}T12:00:00`).toLocaleDateString([], {
+    month: 'long',
+    year: 'numeric',
+  });
   const displayedEvents = testMode ? testEvents : events;
   const menuEvents = displayedEvents.filter((event) => event.menu === effectiveMenu);
   const coolDownDaypartEvents = displayedEvents.filter((event) => event.daypartId === targetDaypartId);
@@ -1188,6 +1239,32 @@ function WasteTab({
           );
         })}
       </div>
+
+      {!testMode && (
+        <section className="mtd-waste-summary" aria-labelledby="mtd-waste-title">
+          <div className="section-heading activity-heading">
+            <div>
+              <p className="eyebrow">{monthToDateLabel} · Cool Down only · Sundays excluded</p>
+              <h2 id="mtd-waste-title">Month-to-date top waste by daypart</h2>
+            </div>
+          </div>
+          <div className="mtd-waste-grid">
+            {monthToDateTopWaste.map((summary) => {
+              const product = settings.products.find((candidate) => candidate.id === summary.productId);
+              return (
+                <div
+                  className={`mtd-waste-card ${product ? `tone-${product.tone}` : 'no-data'}`}
+                  key={summary.daypartId}
+                >
+                  <span>{summary.daypartLabel}</span>
+                  <strong>{summary.productName || 'No waste logged'}</strong>
+                  <span className="mtd-waste-cost">{formatMoney(summary.totalCost)}</span>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       {nuggetPicker && (
         <Modal title="Add individual nuggets" onClose={() => setNuggetPicker(null)}>

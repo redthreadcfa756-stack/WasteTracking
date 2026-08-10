@@ -7,6 +7,7 @@ import {
   buildDonationCsv,
   buildProductCaseProjections,
   buildWasteCsv,
+  buildWeekdayWasteCosts,
   cooldownProductQuantity,
   daypartWaste,
   detectDaypart,
@@ -300,6 +301,37 @@ describe('domain rules', () => {
     ], '2026-08-09', '2026-08-10');
     expect(daily.map((day) => day.dayKey)).toEqual(['2026-08-10']);
     expect(daily[0].totalCost).toBe(4);
+  });
+
+  it('averages repeated weekdays into one Monday-through-Saturday row', () => {
+    const weekdays = buildWeekdayWasteCosts([
+      event({ id: 'monday-one', dayKey: '2026-08-03', equivalentUnits: 5, unitCostSnapshot: 2 }),
+      event({ id: 'monday-two', dayKey: '2026-08-10', equivalentUnits: 15, unitCostSnapshot: 2 }),
+      event({ id: 'saturday-one', dayKey: '2026-08-01', equivalentUnits: 4, unitCostSnapshot: 2 }),
+      event({ id: 'sunday', dayKey: '2026-08-09', equivalentUnits: 100, unitCostSnapshot: 2 }),
+    ], '2026-08-01', '2026-08-10');
+
+    expect(weekdays.map((day) => day.dayLabel)).toEqual([
+      'Monday',
+      'Tuesday',
+      'Wednesday',
+      'Thursday',
+      'Friday',
+      'Saturday',
+    ]);
+    expect(weekdays.find((day) => day.dayLabel === 'Monday')).toMatchObject({
+      dayKeys: ['2026-08-03', '2026-08-10'],
+      occurrenceCount: 2,
+      totalCost: 40,
+      averageCost: 20,
+      highestContributingItem: 'Filets',
+    });
+    expect(weekdays.find((day) => day.dayLabel === 'Saturday')).toMatchObject({
+      dayKeys: ['2026-08-01', '2026-08-08'],
+      occurrenceCount: 2,
+      totalCost: 8,
+      averageCost: 4,
+    });
   });
 
   it('finds the highest-cost wasted item in each daypart for the selected period', () => {

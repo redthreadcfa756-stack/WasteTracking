@@ -330,6 +330,27 @@ code { font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.9em; }
 .activity-row span:not(.activity-dot) { color: var(--muted); font-size: 0.78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .activity-dot { width: 11px; height: 11px; border-radius: 50%; background: var(--protein-color, var(--red)); }
 
+.mtd-waste-summary { display: grid; gap: 0.75rem; margin-top: 0.45rem; }
+.mtd-waste-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.65rem; }
+.mtd-waste-card {
+  display: grid;
+  min-width: 0;
+  gap: 0.3rem;
+  padding: 0.9rem 1rem;
+  border-top: 5px solid var(--protein-color, var(--line));
+  background: var(--panel);
+}
+.mtd-waste-card.no-data { --protein-color: var(--line); }
+.mtd-waste-card > span:first-child {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.mtd-waste-card > strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mtd-waste-cost { color: var(--red); font-family: "Space Grotesk", Inter, sans-serif; font-size: 1.25rem; font-weight: 800; }
+
 .primary-button, .secondary-button {
   display: inline-flex;
   align-items: center;

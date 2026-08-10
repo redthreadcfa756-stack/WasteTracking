@@ -119,6 +119,24 @@ export function subscribeWasteForDay(
   }, onError);
 }
 
+export function subscribeWasteForDateRange(
+  storeId: string,
+  startDayKey: string,
+  endDayKey: string,
+  callback: (events: WasteEvent[]) => void,
+  onError: (error: FirestoreError) => void,
+): Unsubscribe {
+  const services = requireFirebase();
+  const eventsQuery = query(
+    collection(services.db, 'stores', storeId, 'wasteEvents'),
+    where('dayKey', '>=', startDayKey),
+    where('dayKey', '<=', endDayKey),
+  );
+  return onSnapshot(eventsQuery, { includeMetadataChanges: true }, (snapshot) => {
+    callback(snapshot.docs.map((eventDoc) => ({ id: eventDoc.id, ...eventDoc.data() } as WasteEvent)));
+  }, onError);
+}
+
 export async function createWasteEvent(event: Omit<WasteEvent, 'id' | 'eventAt'>): Promise<string> {
   const services = requireFirebase();
   const eventDoc = await addDoc(collection(services.db, 'stores', event.storeId, 'wasteEvents'), {

@@ -416,6 +416,55 @@ export function buildDailyWasteCosts(
   return days;
 }
 
+export interface WeekdayWasteCost {
+  weekday: number;
+  dayLabel: string;
+  dayKeys: string[];
+  occurrenceCount: number;
+  totalCost: number;
+  averageCost: number;
+  entries: number;
+  highestContributingItem: string;
+}
+
+export function buildWeekdayWasteCosts(
+  events: WasteEvent[],
+  startDayKey: string,
+  endDayKey: string,
+): WeekdayWasteCost[] {
+  const dailyCosts = buildDailyWasteCosts(events, startDayKey, endDayKey);
+  const productTotals = new Map<number, Map<string, { name: string; totalCost: number }>>();
+  events.forEach((event) => {
+    if (event.dayKey < startDayKey || event.dayKey > endDayKey || !isOperatingDayKey(event.dayKey)) return;
+    const weekday = dateFromDayKey(event.dayKey).getDay();
+    const weekdayProducts = productTotals.get(weekday) || new Map();
+    const product = weekdayProducts.get(event.productId) || { name: event.productName, totalCost: 0 };
+    product.totalCost += event.equivalentUnits * event.unitCostSnapshot;
+    weekdayProducts.set(event.productId, product);
+    productTotals.set(weekday, weekdayProducts);
+  });
+
+  const dayLabels = ['', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  return Array.from({ length: 6 }, (_, index) => index + 1).flatMap((weekday) => {
+    const days = dailyCosts.filter((day) => dateFromDayKey(day.dayKey).getDay() === weekday);
+    if (days.length === 0) return [];
+    const totalCost = days.reduce((sum, day) => sum + day.totalCost, 0);
+    const highestContributingItem = [...(productTotals.get(weekday)?.values() || [])]
+      .filter((product) => product.totalCost > 0)
+      .sort((a, b) => b.totalCost - a.totalCost || a.name.localeCompare(b.name))[0]?.name || '';
+    return [{
+      weekday,
+      dayLabel: dayLabels[weekday],
+      dayKeys: days.map((day) => day.dayKey),
+      occurrenceCount: days.length,
+      totalCost,
+      averageCost: totalCost / days.length,
+      entries: days.reduce((sum, day) => sum + day.entries, 0),
+      highestContributingItem,
+    }];
+  });
+}
+
 export interface DaypartTopWasteItem {
   daypartId: DaypartId;
   daypartLabel: string;

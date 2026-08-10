@@ -51,8 +51,8 @@ describe('cool down workbook', () => {
       trend: buildWasteTrend(events, settings, 'hour'),
       settings,
       grouping: 'hour',
-      startDayKey: '2026-08-03',
-      endDayKey: '2026-08-08',
+      startDayKey: '2026-08-01',
+      endDayKey: '2026-08-10',
       source: 'live',
       metric: 'quantity',
     });
@@ -63,11 +63,17 @@ describe('cool down workbook', () => {
     expect(daily?.getRow(4).values).toEqual([
       undefined,
       'Day',
-      'Date',
-      'Total Cost',
+      'Dates Averaged',
+      'Average Cost',
       'Highest Contributing Item',
     ]);
+    expect(daily?.getCell('A5').value).toBe('Monday');
+    expect(daily?.getCell('B5').value).toBe('2 dates: 8/3/26–8/10/26');
+    expect(daily?.getCell('C5').value).toBeCloseTo(13.5);
     expect(daily?.getCell('D5').value).toBe('Filets');
+    const weekdayRows = Array.from({ length: 6 }, (_, index) => daily?.getCell(index + 5, 1).value);
+    expect(weekdayRows.filter((day) => day === 'Monday')).toHaveLength(1);
+    expect(weekdayRows).toEqual(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']);
     let daypartSummaryRow = 0;
     daily?.eachRow((row, rowNumber) => {
       if (row.getCell(1).value === 'Top Wasted Item by Daypart — Selected Period') daypartSummaryRow = rowNumber;
@@ -90,8 +96,8 @@ describe('cool down workbook', () => {
     });
     const filetColumn = settings.products.findIndex((product) => product.id === 'filets') + 2;
     expect(projectionRow).toBeGreaterThan(0);
-    expect(matrix?.getCell(projectionRow, filetColumn).value).toBeCloseTo(0.1);
-    expect(matrix?.getCell(projectionRow + 1, filetColumn).value).toBeCloseTo(0.6);
-    expect(matrix?.getCell(projectionRow + 2, filetColumn).value).toBeCloseTo(2.6);
+    expect(matrix?.getCell(projectionRow, filetColumn).value).toBeCloseTo(0.075);
+    expect(matrix?.getCell(projectionRow + 1, filetColumn).value).toBeCloseTo(0.45);
+    expect(matrix?.getCell(projectionRow + 2, filetColumn).value).toBeCloseTo(1.95);
   });
 });
