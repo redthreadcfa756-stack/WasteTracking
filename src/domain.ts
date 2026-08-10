@@ -18,6 +18,56 @@ export function dayKey(date = new Date()): string {
   return `${year}-${month}-${day}`;
 }
 
+export type WasteExportPreset = 'week-to-date' | 'previous-week' | 'month-to-date';
+
+function dateFromDayKey(selectedDayKey: string): Date {
+  return new Date(`${selectedDayKey}T12:00:00`);
+}
+
+export function isOperatingDayKey(selectedDayKey: string): boolean {
+  const date = dateFromDayKey(selectedDayKey);
+  return Number.isFinite(date.getTime()) && date.getDay() !== 0;
+}
+
+export function operatingDayCount(startDayKey: string, endDayKey: string): number {
+  const cursor = dateFromDayKey(startDayKey);
+  const end = dateFromDayKey(endDayKey);
+  if (!Number.isFinite(cursor.getTime()) || !Number.isFinite(end.getTime()) || cursor > end) return 0;
+  let count = 0;
+  while (cursor <= end) {
+    if (cursor.getDay() !== 0) count += 1;
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return count;
+}
+
+export function wasteExportPresetRange(
+  preset: WasteExportPreset,
+  endingDayKey: string,
+): { startDayKey: string; endDayKey: string } {
+  const end = dateFromDayKey(endingDayKey);
+  if (!Number.isFinite(end.getTime())) return { startDayKey: '', endDayKey: '' };
+  if (end.getDay() === 0) end.setDate(end.getDate() - 1);
+
+  if (preset === 'month-to-date') {
+    const start = new Date(end.getFullYear(), end.getMonth(), 1, 12);
+    if (start.getDay() === 0) start.setDate(start.getDate() + 1);
+    return { startDayKey: dayKey(start), endDayKey: dayKey(end) };
+  }
+
+  const currentMonday = new Date(end);
+  currentMonday.setDate(currentMonday.getDate() - ((currentMonday.getDay() + 6) % 7));
+  if (preset === 'week-to-date') {
+    return { startDayKey: dayKey(currentMonday), endDayKey: dayKey(end) };
+  }
+
+  const start = new Date(currentMonday);
+  start.setDate(start.getDate() - 7);
+  const previousSaturday = new Date(start);
+  previousSaturday.setDate(previousSaturday.getDate() + 5);
+  return { startDayKey: dayKey(start), endDayKey: dayKey(previousSaturday) };
+}
+
 export function previousDayKey(date = new Date()): string {
   const previous = new Date(date);
   previous.setDate(previous.getDate() - 1);
@@ -317,6 +367,7 @@ export interface DailyWasteCost {
   dayKey: string;
   totalCost: number;
   entries: number;
+  highestContributingItem: string;
 }
 
 export function buildDailyWasteCosts(
@@ -324,12 +375,20 @@ export function buildDailyWasteCosts(
   startDayKey: string,
   endDayKey: string,
 ): DailyWasteCost[] {
-  const totals = new Map<string, { totalCost: number; entries: number }>();
+  const totals = new Map<string, {
+    totalCost: number;
+    entries: number;
+    products: Map<string, { name: string; totalCost: number }>;
+  }>();
   events.forEach((event) => {
-    if (event.dayKey < startDayKey || event.dayKey > endDayKey) return;
-    const current = totals.get(event.dayKey) || { totalCost: 0, entries: 0 };
-    current.totalCost += event.equivalentUnits * event.unitCostSnapshot;
+    if (event.dayKey < startDayKey || event.dayKey > endDayKey || !isOperatingDayKey(event.dayKey)) return;
+    const current = totals.get(event.dayKey) || { totalCost: 0, entries: 0, products: new Map() };
+    const eventCost = event.equivalentUnits * event.unitCostSnapshot;
+    current.totalCost += eventCost;
     current.entries += 1;
+    const product = current.products.get(event.productId) || { name: event.productName, totalCost: 0 };
+    product.totalCost += eventCost;
+    current.products.set(event.productId, product);
     totals.set(event.dayKey, current);
   });
 
@@ -338,15 +397,130 @@ export function buildDailyWasteCosts(
   const end = new Date(`${endDayKey}T12:00:00`);
   while (cursor <= end) {
     const selectedDayKey = dayKey(cursor);
-    const total = totals.get(selectedDayKey);
-    days.push({
-      dayKey: selectedDayKey,
-      totalCost: total?.totalCost || 0,
-      entries: total?.entries || 0,
-    });
+    if (cursor.getDay() !== 0) {
+      const total = totals.get(selectedDayKey);
+      const highestContributingItem = total
+        ? [...total.products.values()]
+          .filter((product) => product.totalCost > 0)
+          .sort((a, b) => b.totalCost - a.totalCost || a.name.localeCompare(b.name))[0]?.name || ''
+        : '';
+      days.push({
+        dayKey: selectedDayKey,
+        totalCost: total?.totalCost || 0,
+        entries: total?.entries || 0,
+        highestContributingItem,
+      });
+    }
     cursor.setDate(cursor.getDate() + 1);
   }
   return days;
+}
+
+export interface DaypartTopWasteItem {
+  daypartId: DaypartId;
+  daypartLabel: string;
+  productId: string | null;
+  productName: string;
+  totalCost: number;
+}
+
+export function buildDaypartTopWasteItems(
+  events: WasteEvent[],
+  settings: AppSettings,
+  startDayKey: string,
+  endDayKey: string,
+): DaypartTopWasteItem[] {
+  const productNames = new Map(settings.products.map((product) => [product.id, product.name]));
+  const totals = new Map<string, { productId: string; productName: string; totalCost: number }>();
+  events.forEach((event) => {
+    if (event.dayKey < startDayKey || event.dayKey > endDayKey || !isOperatingDayKey(event.dayKey)) return;
+    const key = `${event.daypartId}|${event.productId}`;
+    const current = totals.get(key) || {
+      productId: event.productId,
+      productName: productNames.get(event.productId) || event.productName,
+      totalCost: 0,
+    };
+    current.totalCost += event.equivalentUnits * event.unitCostSnapshot;
+    totals.set(key, current);
+  });
+
+  return settings.dayparts.map((daypart) => {
+    const highest = [...totals.entries()]
+      .filter(([key, product]) => key.startsWith(`${daypart.id}|`) && product.totalCost > 0)
+      .map(([, product]) => product)
+      .sort((a, b) => b.totalCost - a.totalCost || a.productName.localeCompare(b.productName))[0];
+    return {
+      daypartId: daypart.id,
+      daypartLabel: daypart.label,
+      productId: highest?.productId || null,
+      productName: highest?.productName || '',
+      totalCost: highest?.totalCost || 0,
+    };
+  });
+}
+
+export interface ProductCaseProjection {
+  productId: string;
+  totalCases: number | null;
+  casesPerDay: number | null;
+  casesPerWeek: number | null;
+  casesPerMonth: number | null;
+  operatingDays: number;
+  operatingDaysInMonth: number;
+}
+
+export function buildProductCaseProjections(
+  events: WasteEvent[],
+  settings: AppSettings,
+  startDayKey: string,
+  endDayKey: string,
+): ProductCaseProjection[] {
+  const selectedOperatingDays = operatingDayCount(startDayKey, endDayKey);
+  const end = dateFromDayKey(endDayKey);
+  const monthStart = Number.isFinite(end.getTime())
+    ? dayKey(new Date(end.getFullYear(), end.getMonth(), 1, 12))
+    : '';
+  const monthEnd = Number.isFinite(end.getTime())
+    ? dayKey(new Date(end.getFullYear(), end.getMonth() + 1, 0, 12))
+    : '';
+  const operatingDaysInMonth = monthStart && monthEnd ? operatingDayCount(monthStart, monthEnd) : 0;
+  const totals = new Map<string, number>();
+  events.forEach((event) => {
+    if (event.dayKey < startDayKey || event.dayKey > endDayKey || !isOperatingDayKey(event.dayKey)) return;
+    totals.set(event.productId, (totals.get(event.productId) || 0) + event.equivalentUnits);
+  });
+
+  return settings.products.map((configuredProduct) => {
+    const product = withDerivedProductPricing(configuredProduct);
+    const caseWeightLb = product.caseWeightLb || 0;
+    const canProject = selectedOperatingDays > 0
+      && operatingDaysInMonth > 0
+      && caseWeightLb > 0
+      && product.averageWeightLb > 0;
+    if (!canProject) {
+      return {
+        productId: product.id,
+        totalCases: null,
+        casesPerDay: null,
+        casesPerWeek: null,
+        casesPerMonth: null,
+        operatingDays: selectedOperatingDays,
+        operatingDaysInMonth,
+      };
+    }
+    const totalUnits = Math.max(0, totals.get(product.id) || 0);
+    const totalCases = totalUnits * product.averageWeightLb / caseWeightLb;
+    const casesPerDay = totalCases / selectedOperatingDays;
+    return {
+      productId: product.id,
+      totalCases,
+      casesPerDay,
+      casesPerWeek: casesPerDay * 6,
+      casesPerMonth: casesPerDay * operatingDaysInMonth,
+      operatingDays: selectedOperatingDays,
+      operatingDaysInMonth,
+    };
+  });
 }
 
 export function buildWasteTrend(

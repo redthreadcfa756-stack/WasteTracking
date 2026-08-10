@@ -68,7 +68,9 @@ Donation weights use calculator-style entry so typed digits fill from right to l
 
 The Donations tab presents count entry without user-facing prediction amounts. A date selector supports prior dates; revising a submitted date allows corrections to its saved amounts, accepts newly added amounts separately, and calculates the updated totals automatically.
 
-Every cool down workbook includes a Daily Waste Cost sheet. It lists each selected calendar day and highlights the three highest total-cost days, regardless of whether the Product by Time matrix uses units or dollars.
+Cool down exports support selected-day, week-to-date, previous-week, month-to-date, rolling-range, and custom date options. Business weeks run Monday through Saturday, and Sundays are excluded from cool down export data and operating-day calculations.
+
+Every cool down workbook includes a Daily Waste Cost sheet with day, date, total cost, and highest contributing item. It highlights the three highest total-cost days and lists the highest-cost wasted item in each daypart across the selected period, regardless of whether the Product by Time matrix uses units or dollars. The Product by Time sheet keeps its existing averages and adds projected cases per operating day, six-day business week, and calendar month. Case projections use total net quantity across the selected range divided by every Monday–Saturday day, including zero-entry days; the monthly run rate uses the exact number of Monday–Saturday days in the ending date’s month.
 
 The Discard tab includes Large fries as a discard-only product counted by serving. Its default per-serving weight is 6.15 ounces, the midpoint of the 5.6–6.7 ounce range, for optional admin pricing calculations.
 

@@ -1,6 +1,31 @@
 import { describe, expect, it } from 'vitest';
 import { COOLDOWN_PANS, DEFAULT_PRODUCTS, DEFAULT_SETTINGS, PRODUCT_TONES } from './defaults';
-import { adjustCooldownProductQuantities, buildDailyWasteCosts, buildDonationCsv, buildWasteCsv, cooldownProductQuantity, daypartWaste, detectDaypart, distributeDollarTarget, donationPrediction, donationWindowDayKeys, formatDurationInput, mergeActivity, parseDonationEntry, parseDuration, pendingQuantityAfterServerUpdate, quantityAdjustmentFromDrag, targetCasesForProduct, targetDollarForProduct, weightToPounds, withDerivedProductPricing } from './domain';
+import {
+  adjustCooldownProductQuantities,
+  buildDailyWasteCosts,
+  buildDaypartTopWasteItems,
+  buildDonationCsv,
+  buildProductCaseProjections,
+  buildWasteCsv,
+  cooldownProductQuantity,
+  daypartWaste,
+  detectDaypart,
+  distributeDollarTarget,
+  donationPrediction,
+  donationWindowDayKeys,
+  formatDurationInput,
+  mergeActivity,
+  operatingDayCount,
+  parseDonationEntry,
+  parseDuration,
+  pendingQuantityAfterServerUpdate,
+  quantityAdjustmentFromDrag,
+  targetCasesForProduct,
+  targetDollarForProduct,
+  wasteExportPresetRange,
+  weightToPounds,
+  withDerivedProductPricing,
+} from './domain';
 import type { CooldownTimer, DiscardEvent, DonationItemConfig, DonationRecord, WasteEvent } from './types';
 
 const event = (overrides: Partial<WasteEvent>): WasteEvent => ({
@@ -215,17 +240,89 @@ describe('domain rules', () => {
     expect(csv).toContain('Product detail,Filets,1,1,YES,YES');
   });
 
-  it('calculates raw daily waste costs across every selected calendar day', () => {
+  it('calculates raw daily waste costs across every selected operating day', () => {
     const daily = buildDailyWasteCosts([
-      event({ id: 'a', dayKey: '2026-07-01', equivalentUnits: 2, unitCostSnapshot: 3 }),
-      event({ id: 'b', dayKey: '2026-07-01', equivalentUnits: 1, unitCostSnapshot: 4 }),
+      event({ id: 'a', productId: 'filets', productName: 'Filets', dayKey: '2026-07-01', equivalentUnits: 2, unitCostSnapshot: 3 }),
+      event({ id: 'b', productId: 'spicy', productName: 'Spicy filets', dayKey: '2026-07-01', equivalentUnits: 1, unitCostSnapshot: 4 }),
       event({ id: 'c', dayKey: '2026-07-03', equivalentUnits: 5, unitCostSnapshot: 2 }),
     ], '2026-07-01', '2026-07-03');
     expect(daily).toEqual([
-      { dayKey: '2026-07-01', totalCost: 10, entries: 2 },
-      { dayKey: '2026-07-02', totalCost: 0, entries: 0 },
-      { dayKey: '2026-07-03', totalCost: 10, entries: 1 },
+      { dayKey: '2026-07-01', totalCost: 10, entries: 2, highestContributingItem: 'Filets' },
+      { dayKey: '2026-07-02', totalCost: 0, entries: 0, highestContributingItem: '' },
+      { dayKey: '2026-07-03', totalCost: 10, entries: 1, highestContributingItem: 'Filets' },
     ]);
+  });
+
+  it('uses Monday through Saturday for export presets and operating-day counts', () => {
+    expect(wasteExportPresetRange('week-to-date', '2026-08-13')).toEqual({
+      startDayKey: '2026-08-10',
+      endDayKey: '2026-08-13',
+    });
+    expect(wasteExportPresetRange('previous-week', '2026-08-13')).toEqual({
+      startDayKey: '2026-08-03',
+      endDayKey: '2026-08-08',
+    });
+    expect(wasteExportPresetRange('month-to-date', '2026-08-13')).toEqual({
+      startDayKey: '2026-08-01',
+      endDayKey: '2026-08-13',
+    });
+    expect(operatingDayCount('2026-08-01', '2026-08-09')).toBe(7);
+  });
+
+  it('projects product cases from every selected operating day and excludes Sundays', () => {
+    const settings = {
+      ...DEFAULT_SETTINGS,
+      products: DEFAULT_SETTINGS.products.map((product) => product.id === 'filets' ? {
+        ...product,
+        averageWeightLb: 0.5,
+        perUnitWeight: 0.5,
+        perUnitWeightUnit: 'lb' as const,
+        caseWeightLb: 10,
+      } : product),
+    };
+    const projection = buildProductCaseProjections([
+      event({ id: 'a', dayKey: '2026-08-03', equivalentUnits: 6 }),
+      event({ id: 'b', dayKey: '2026-08-08', equivalentUnits: 6 }),
+      event({ id: 'sunday', dayKey: '2026-08-09', equivalentUnits: 100 }),
+    ], settings, '2026-08-03', '2026-08-09').find((entry) => entry.productId === 'filets');
+
+    expect(projection).toMatchObject({ operatingDays: 6, operatingDaysInMonth: 26 });
+    expect(projection?.totalCases).toBeCloseTo(0.6);
+    expect(projection?.casesPerDay).toBeCloseTo(0.1);
+    expect(projection?.casesPerWeek).toBeCloseTo(0.6);
+    expect(projection?.casesPerMonth).toBeCloseTo(2.6);
+  });
+
+  it('omits Sundays from daily waste cost rows', () => {
+    const daily = buildDailyWasteCosts([
+      event({ id: 'sunday', dayKey: '2026-08-09', equivalentUnits: 10 }),
+      event({ id: 'monday', dayKey: '2026-08-10', equivalentUnits: 2 }),
+    ], '2026-08-09', '2026-08-10');
+    expect(daily.map((day) => day.dayKey)).toEqual(['2026-08-10']);
+    expect(daily[0].totalCost).toBe(4);
+  });
+
+  it('finds the highest-cost wasted item in each daypart for the selected period', () => {
+    const summaries = buildDaypartTopWasteItems([
+      event({ id: 'breakfast-filets', dayKey: '2026-08-03', daypartId: 'breakfast', equivalentUnits: 3, unitCostSnapshot: 2 }),
+      event({ id: 'lunch-filets', dayKey: '2026-08-03', daypartId: 'lunch', equivalentUnits: 2, unitCostSnapshot: 2 }),
+      event({ id: 'lunch-spicy', productId: 'spicy', productName: 'Spicy filets', dayKey: '2026-08-04', daypartId: 'lunch', equivalentUnits: 2, unitCostSnapshot: 3 }),
+      event({ id: 'sunday', productId: 'nuggets', productName: 'Nuggets', dayKey: '2026-08-09', daypartId: 'lunch', equivalentUnits: 100, unitCostSnapshot: 3 }),
+    ], DEFAULT_SETTINGS, '2026-08-03', '2026-08-09');
+
+    expect(summaries.find((summary) => summary.daypartId === 'breakfast')).toMatchObject({
+      productName: 'Filets',
+      totalCost: 6,
+    });
+    expect(summaries.find((summary) => summary.daypartId === 'lunch')).toMatchObject({
+      productName: 'Spicy filets',
+      totalCost: 6,
+    });
+    expect(summaries.find((summary) => summary.daypartId === 'afternoon')).toMatchObject({
+      productId: null,
+      productName: '',
+      totalCost: 0,
+    });
   });
 
   it('ranks both a product’s top times and a time’s top products', () => {

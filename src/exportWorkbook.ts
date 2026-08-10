@@ -1,6 +1,12 @@
 import ExcelJS from 'exceljs';
 import type { AppSettings, DonationRecord, WasteEvent } from './types';
-import { buildDailyWasteCosts, type WasteExportGrouping, type WasteTrendBucket } from './domain';
+import {
+  buildDaypartTopWasteItems,
+  buildDailyWasteCosts,
+  buildProductCaseProjections,
+  type WasteExportGrouping,
+  type WasteTrendBucket,
+} from './domain';
 
 const RED = 'FFBA002E';
 const DARK = 'FF111D23';
@@ -154,6 +160,7 @@ export async function createWasteTrendWorkbook({
   workbook.subject = 'Cool Down trend report';
 
   const dailyCosts = buildDailyWasteCosts(events, startDayKey, endDayKey);
+  const daypartTopWaste = buildDaypartTopWasteItems(events, settings, startDayKey, endDayKey);
   const topCostRanks = new Map(
     [...dailyCosts]
       .filter((day) => day.totalCost > 0)
@@ -164,28 +171,29 @@ export async function createWasteTrendWorkbook({
   const daily = workbook.addWorksheet('Daily Waste Cost', {
     views: [{ state: 'frozen', ySplit: 4, showGridLines: false }],
   });
-  applyTitle(daily, 4, 'Daily Cool Down Cost');
+  applyTitle(daily, 4, 'Daily Waste Cost');
   daily.getCell('A2').value = 'Date range';
   daily.getCell('B2').value = startDayKey;
   daily.getCell('C2').value = endDayKey;
   daily.getCell('A3').value = 'How to read';
-  daily.getCell('B3').value = 'Daily totals are ranked by cool down cost. The three highest-cost days are highlighted yellow regardless of the Product by Time metric.';
+  daily.getCell('B3').value = 'Monday–Saturday totals are ranked by cool down cost. The three highest-cost days are highlighted yellow. Highest contributing items use net product cost for the day or selected-period daypart.';
   daily.mergeCells('B3:D3');
   daily.getCell('B3').alignment = { wrapText: true, vertical: 'middle' };
   daily.getRow(3).height = 30;
-  daily.getRow(4).values = ['Date', 'Total Cool Down Cost', 'Logged Entries', 'Cost Rank'];
+  daily.getRow(4).values = ['Day', 'Date', 'Total Cost', 'Highest Contributing Item'];
   applyHeader(daily.getRow(4));
 
   dailyCosts.forEach((day, index) => {
     const rowNumber = index + 5;
     const row = daily.getRow(rowNumber);
     const rank = topCostRanks.get(day.dayKey);
-    daily.getCell(rowNumber, 1).value = new Date(`${day.dayKey}T12:00:00`);
-    daily.getCell(rowNumber, 1).numFmt = 'm-d-yy';
-    daily.getCell(rowNumber, 2).value = day.totalCost;
-    daily.getCell(rowNumber, 2).numFmt = '$0.00';
-    daily.getCell(rowNumber, 3).value = day.entries;
-    daily.getCell(rowNumber, 4).value = rank || null;
+    const date = new Date(`${day.dayKey}T12:00:00`);
+    daily.getCell(rowNumber, 1).value = date.toLocaleDateString('en-US', { weekday: 'long' });
+    daily.getCell(rowNumber, 2).value = date;
+    daily.getCell(rowNumber, 2).numFmt = 'm-d-yy';
+    daily.getCell(rowNumber, 3).value = day.totalCost;
+    daily.getCell(rowNumber, 3).numFmt = '$0.00';
+    daily.getCell(rowNumber, 4).value = day.highestContributingItem || '—';
     if (index % 2 === 1) {
       row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: PALE_BLUE } };
     }
@@ -196,11 +204,38 @@ export async function createWasteTrendWorkbook({
   });
   const lastDailyRow = Math.max(4, dailyCosts.length + 4);
   daily.autoFilter = { from: 'A4', to: `D${lastDailyRow}` };
+  const daypartTitleRow = lastDailyRow + 2;
+  const daypartHeaderRow = daypartTitleRow + 1;
+  daily.mergeCells(daypartTitleRow, 1, daypartTitleRow, 4);
+  const daypartTitle = daily.getCell(daypartTitleRow, 1);
+  daypartTitle.value = 'Top Wasted Item by Daypart — Selected Period';
+  daypartTitle.font = { bold: true, color: { argb: WHITE }, size: 12 };
+  daypartTitle.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: RED } };
+  daypartTitle.alignment = { vertical: 'middle', horizontal: 'left' };
+  daily.getRow(daypartTitleRow).height = 24;
+  daily.getRow(daypartHeaderRow).values = ['Daypart', 'Top Wasted Item', 'Contributing Cost'];
+  applyHeader(daily.getRow(daypartHeaderRow));
+  daypartTopWaste.forEach((daypart, index) => {
+    const rowNumber = daypartHeaderRow + index + 1;
+    const row = daily.getRow(rowNumber);
+    daily.getCell(rowNumber, 1).value = daypart.daypartLabel;
+    daily.getCell(rowNumber, 1).font = { bold: true };
+    daily.getCell(rowNumber, 2).value = daypart.productName || '—';
+    daily.getCell(rowNumber, 3).value = daypart.totalCost;
+    daily.getCell(rowNumber, 3).numFmt = '$0.00';
+    if (index % 2 === 1) {
+      row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: PALE_BLUE } };
+    }
+  });
   daily.getColumn(1).width = 16;
   daily.getColumn(2).width = 24;
   daily.getColumn(3).width = 18;
-  daily.getColumn(4).width = 14;
+  daily.getColumn(4).width = 28;
 
+  const productCaseProjections = new Map(
+    buildProductCaseProjections(events, settings, startDayKey, endDayKey)
+      .map((projection) => [projection.productId, projection]),
+  );
   const productNames = settings.products.map((product) => product.name);
   const labels = timeLabels(settings, grouping);
   const trendByLabel = new Map(trend.map((bucket) => [bucket.label, bucket]));
@@ -217,8 +252,8 @@ export async function createWasteTrendWorkbook({
   matrix.getCell('B3').value = source === 'demo' ? 'Demo data' : 'Live data';
   matrix.getCell('A4').value = 'How to read';
   matrix.getCell('B4').value = metric === 'cost'
-    ? 'Each value is average cool down dollars per logged day. The top three dollar cool down times for each product are highlighted yellow.'
-    : 'Each value is average cool down units per logged day. The top three unit cool down times for each product are highlighted yellow.';
+    ? 'Each value is average cool down dollars per logged day. The top three dollar cool down times for each product are highlighted yellow. Case projections use total net quantity divided by every selected Monday–Saturday day; weekly is daily × 6 and monthly uses the exact Monday–Saturday count in the ending date’s month.'
+    : 'Each value is average cool down units per logged day. The top three unit cool down times for each product are highlighted yellow. Case projections use total net quantity divided by every selected Monday–Saturday day; weekly is daily × 6 and monthly uses the exact Monday–Saturday count in the ending date’s month.';
   matrix.mergeCells(4, 2, 4, lastColumn);
   matrix.getCell('A5').value = grouping === 'hour' ? 'Hour' : 'Daypart';
   productNames.forEach((name, index) => {
@@ -266,13 +301,39 @@ export async function createWasteTrendWorkbook({
     });
   });
 
+  const firstProjectionRow = 5 + labels.length + 2;
+  const projectionRows = [
+    { label: 'Projected cases / operating day', key: 'casesPerDay' as const },
+    { label: 'Projected cases / business week', key: 'casesPerWeek' as const },
+    { label: 'Projected cases / calendar month', key: 'casesPerMonth' as const },
+  ];
+  projectionRows.forEach((projectionRow, index) => {
+    const rowNumber = firstProjectionRow + index;
+    const row = matrix.getRow(rowNumber);
+    matrix.getCell(rowNumber, 1).value = projectionRow.label;
+    matrix.getCell(rowNumber, 1).font = { bold: true, color: { argb: DARK } };
+    row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: PALE_BLUE } };
+    row.height = 24;
+    settings.products.forEach((product, productIndex) => {
+      const projection = productCaseProjections.get(product.id);
+      const value = projection?.[projectionRow.key];
+      const cell = matrix.getCell(rowNumber, productIndex + 2);
+      cell.value = value === null || value === undefined ? 'Not configured' : value;
+      if (typeof cell.value === 'number') cell.numFmt = '0.000 "cases"';
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+    });
+  });
+  matrix.getRow(firstProjectionRow).border = {
+    top: { style: 'medium', color: { argb: DARK } },
+  };
+
   matrix.autoFilter = {
     from: { row: 5, column: 1 },
     to: { row: 5 + labels.length, column: lastColumn },
   };
-  matrix.getColumn(1).width = 18;
-  for (let column = 2; column <= lastColumn; column += 1) matrix.getColumn(column).width = 16;
-  matrix.getRow(4).height = 32;
+  matrix.getColumn(1).width = 34;
+  for (let column = 2; column <= lastColumn; column += 1) matrix.getColumn(column).width = 18;
+  matrix.getRow(4).height = 58;
   matrix.getCell('B4').alignment = { wrapText: true, vertical: 'middle' };
 
   const buffer = await workbook.xlsx.writeBuffer();

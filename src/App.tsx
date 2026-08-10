@@ -67,9 +67,13 @@ import {
   pendingQuantityAfterServerUpdate,
   productWaste,
   quantityAdjustmentFromDrag,
+  isOperatingDayKey,
+  operatingDayCount,
   targetCasesForProduct,
   targetDollarForProduct,
+  wasteExportPresetRange,
   withDerivedProductPricing,
+  type WasteExportPreset,
   type WasteExportGrouping,
 } from './domain';
 import { createDonationWorkbook, createWasteTrendWorkbook } from './exportWorkbook';
@@ -91,7 +95,7 @@ import type {
 
 type TabId = 'waste' | 'discard' | 'sos' | 'donations' | 'admin';
 type MenuSelection = 'auto' | MenuId;
-type ExportPeriod = 1 | 30 | 60 | 90 | 'custom';
+type ExportPeriod = 1 | 30 | 60 | 90 | WasteExportPreset | 'custom';
 const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || '00756';
 const WRITE_TIMEOUT_MS = 8_000;
 function confirmWrite<T>(write: Promise<T>): Promise<T> {
@@ -2096,37 +2100,49 @@ function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDay
 
   const updateExportDates = (period: ExportPeriod, endingDate: string) => {
     setExportPeriod(period);
-    setExportEndDate(endingDate);
-    if (period === 'custom') return;
-    if (!endingDate) {
-      setExportStartDate('');
+    if (period === 'custom') {
+      setExportEndDate(endingDate);
       return;
     }
+    if (!endingDate) {
+      setExportStartDate('');
+      setExportEndDate('');
+      return;
+    }
+    if (typeof period === 'string') {
+      const range = wasteExportPresetRange(period, endingDate);
+      setExportStartDate(range.startDayKey);
+      setExportEndDate(range.endDayKey);
+      return;
+    }
+    setExportEndDate(endingDate);
     const startDate = new Date(`${endingDate}T12:00:00`);
     startDate.setDate(startDate.getDate() - (period - 1));
     setExportStartDate(dayKey(startDate));
   };
 
-  const selectedExportDays = () => {
+  const selectedExportDays = (operatingDaysOnly = false) => {
     const start = Date.parse(`${exportStartDate}T00:00:00Z`);
     const end = Date.parse(`${exportEndDate}T00:00:00Z`);
     if (!Number.isFinite(start) || !Number.isFinite(end) || start > end) return null;
+    if (operatingDaysOnly) return operatingDayCount(exportStartDate, exportEndDate);
     return Math.round((end - start) / 86_400_000) + 1;
   };
 
   const exportWaste = async () => {
     setExporting(true);
     try {
-      const exportDays = selectedExportDays();
+      const exportDays = selectedExportDays(true);
       if (!exportDays) {
-        notify('Choose a starting date that is on or before the ending date.');
+        notify('Choose a range containing at least one Monday–Saturday operating day.');
         return;
       }
-      const events = exportSource === 'demo'
+      const loadedEvents = exportSource === 'demo'
         ? await loadDemoWasteForDateRange(storeId, exportStartDate, exportEndDate)
         : await loadWasteForDateRange(storeId, exportStartDate, exportEndDate);
+      const events = loadedEvents.filter((event) => isOperatingDayKey(event.dayKey));
       if (events.length === 0) {
-        notify(`No cool down data was found from ${exportStartDate} through ${exportEndDate}.`);
+        notify(`No Monday–Saturday cool down data was found from ${exportStartDate} through ${exportEndDate}.`);
         return;
       }
       const trend = buildWasteTrend(events, draft, exportGrouping);
@@ -2148,13 +2164,13 @@ function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDay
       const sourcePrefix = exportSource === 'demo' ? 'demo-' : '';
       link.download = exportDays === 1
         ? `${sourcePrefix}cool-down-${exportEndDate}-by-${exportGrouping}-${exportMetric}.xlsx`
-        : `${sourcePrefix}cool-down-${exportDays}-days-ending-${exportEndDate}-by-${exportGrouping}-${exportMetric}.xlsx`;
+        : `${sourcePrefix}cool-down-${exportDays}-operating-days-ending-${exportEndDate}-by-${exportGrouping}-${exportMetric}.xlsx`;
       link.style.display = 'none';
       document.body.appendChild(link);
       link.click();
       link.remove();
       window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
-      notify(`${exportDays}-day cool down export downloaded.`);
+      notify(`${exportDays}-operating-day cool down export downloaded.`);
     } catch (caught) {
       notify(errorMessage(caught));
     } finally {
@@ -2505,9 +2521,18 @@ function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDay
           Period
           <select value={exportPeriod} onChange={(event) => {
             const value = event.target.value;
-            updateExportDates(value === 'custom' ? 'custom' : Number(value) as 1 | 30 | 60 | 90, exportEndDate);
+            const isBusinessPreset = value === 'week-to-date'
+              || value === 'previous-week'
+              || value === 'month-to-date';
+            const period = value === 'custom' || isBusinessPreset
+              ? value as ExportPeriod
+              : Number(value) as 1 | 30 | 60 | 90;
+            updateExportDates(period, isBusinessPreset ? dayKey() : exportEndDate);
           }}>
             <option value={1}>Selected day</option>
+            <option value="week-to-date">Week to date (Mon–Sat)</option>
+            <option value="previous-week">Previous week (Mon–Sat)</option>
+            <option value="month-to-date">Month to date (no Sundays)</option>
             <option value={30}>Current 30 days</option>
             <option value={60}>Current 60 days</option>
             <option value={90}>Current 90 days</option>
