@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { COOLDOWN_PANS, DEFAULT_PRODUCTS, DEFAULT_SETTINGS, PRODUCT_TONES } from './defaults';
 import {
   adjustCooldownProductQuantities,
+  buildDailyWasteSummary,
   buildDailyWasteCosts,
   buildDaypartTopWasteItems,
+  buildDaypartTopWasteItemsFromDailySummaries,
   buildDonationCsv,
   buildProductCaseProjections,
   buildWasteCsv,
@@ -354,6 +356,34 @@ describe('domain rules', () => {
       productId: null,
       productName: '',
       totalCost: 0,
+    });
+  });
+
+  it('builds completed-day summaries and ranks month-to-date waste without individual events', () => {
+    const monday = buildDailyWasteSummary([
+      event({ id: 'filets-add', dayKey: '2026-08-03', daypartId: 'breakfast', equivalentUnits: 3, unitCostSnapshot: 2 }),
+      event({ id: 'filets-adjust', dayKey: '2026-08-03', daypartId: 'breakfast', equivalentUnits: -1, unitCostSnapshot: 2 }),
+      event({ id: 'spicy', productId: 'spicy', productName: 'Spicy filets', dayKey: '2026-08-03', daypartId: 'lunch', equivalentUnits: 2, unitCostSnapshot: 3 }),
+    ], '00756', '2026-08-03', 'uid');
+    const tuesday = buildDailyWasteSummary([
+      event({ id: 'more-spicy', productId: 'spicy', productName: 'Spicy filets', dayKey: '2026-08-04', daypartId: 'lunch', equivalentUnits: 2, unitCostSnapshot: 3 }),
+    ], '00756', '2026-08-04', 'uid');
+    const sunday = buildDailyWasteSummary([
+      event({ id: 'ignored', dayKey: '2026-08-09', equivalentUnits: 100, unitCostSnapshot: 10 }),
+    ], '00756', '2026-08-09', 'uid');
+
+    expect(monday).toMatchObject({ sourceEventCount: 3, computedAt: null, computedBy: 'uid' });
+    expect(monday.items.find((item) => item.productId === 'filets')).toMatchObject({ totalCost: 4 });
+    expect(sunday).toMatchObject({ sourceEventCount: 0, items: [] });
+
+    const leaders = buildDaypartTopWasteItemsFromDailySummaries([monday, tuesday, sunday], DEFAULT_SETTINGS);
+    expect(leaders.find((summary) => summary.daypartId === 'breakfast')).toMatchObject({
+      productName: 'Filets',
+      totalCost: 4,
+    });
+    expect(leaders.find((summary) => summary.daypartId === 'lunch')).toMatchObject({
+      productName: 'Spicy filets',
+      totalCost: 12,
     });
   });
 

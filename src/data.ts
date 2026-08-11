@@ -27,8 +27,8 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore';
 import { auth, db } from './firebase';
-import { adjustCooldownProductQuantities } from './domain';
-import type { AppSettings, CooldownPanId, CooldownTimer, DiscardEvent, DonationRecord, MemberProfile, SosEntry, WasteEvent } from './types';
+import { adjustCooldownProductQuantities, buildDailyWasteSummary, isOperatingDayKey } from './domain';
+import type { AppSettings, CooldownPanId, CooldownTimer, DailyWasteSummary, DiscardEvent, DonationRecord, MemberProfile, SosEntry, WasteEvent } from './types';
 
 function requireFirebase() {
   if (!auth || !db) throw new Error('Firebase environment variables are missing.');
@@ -119,22 +119,81 @@ export function subscribeWasteForDay(
   }, onError);
 }
 
-export function subscribeWasteForDateRange(
+export function subscribeDailyWasteSummaries(
   storeId: string,
   startDayKey: string,
   endDayKey: string,
-  callback: (events: WasteEvent[]) => void,
+  callback: (summaries: DailyWasteSummary[]) => void,
   onError: (error: FirestoreError) => void,
 ): Unsubscribe {
   const services = requireFirebase();
-  const eventsQuery = query(
-    collection(services.db, 'stores', storeId, 'wasteEvents'),
+  const summariesQuery = query(
+    collection(services.db, 'stores', storeId, 'dailyWasteSummaries'),
     where('dayKey', '>=', startDayKey),
     where('dayKey', '<=', endDayKey),
   );
-  return onSnapshot(eventsQuery, { includeMetadataChanges: true }, (snapshot) => {
-    callback(snapshot.docs.map((eventDoc) => ({ id: eventDoc.id, ...eventDoc.data() } as WasteEvent)));
+  return onSnapshot(summariesQuery, { includeMetadataChanges: true }, (snapshot) => {
+    callback(snapshot.docs.map((summaryDoc) => summaryDoc.data() as DailyWasteSummary));
   }, onError);
+}
+
+function operatingDayKeysInRange(startDayKey: string, endDayKey: string): string[] {
+  if (startDayKey > endDayKey) return [];
+  const cursor = new Date(`${startDayKey}T12:00:00`);
+  const end = new Date(`${endDayKey}T12:00:00`);
+  const result: string[] = [];
+  while (cursor <= end) {
+    const selectedDayKey = [
+      cursor.getFullYear(),
+      String(cursor.getMonth() + 1).padStart(2, '0'),
+      String(cursor.getDate()).padStart(2, '0'),
+    ].join('-');
+    if (isOperatingDayKey(selectedDayKey)) result.push(selectedDayKey);
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return result;
+}
+
+export async function ensureDailyWasteSummaries(
+  storeId: string,
+  startDayKey: string,
+  endDayKey: string,
+): Promise<void> {
+  const requiredDayKeys = operatingDayKeysInRange(startDayKey, endDayKey);
+  if (requiredDayKeys.length === 0) return;
+
+  const services = requireFirebase();
+  const summariesCollection = collection(services.db, 'stores', storeId, 'dailyWasteSummaries');
+  const existingSnapshot = await getDocs(query(
+    summariesCollection,
+    where('dayKey', '>=', startDayKey),
+    where('dayKey', '<=', endDayKey),
+  ));
+  const existingDayKeys = new Set(existingSnapshot.docs.map((summaryDoc) => summaryDoc.id));
+  const missingDayKeys = requiredDayKeys.filter((selectedDayKey) => !existingDayKeys.has(selectedDayKey));
+  if (missingDayKeys.length === 0) return;
+
+  const computedBy = services.auth.currentUser?.uid || '';
+  const summaries = await Promise.all(missingDayKeys.map(async (selectedDayKey) => {
+    const eventsSnapshot = await getDocs(query(
+      collection(services.db, 'stores', storeId, 'wasteEvents'),
+      where('dayKey', '==', selectedDayKey),
+    ));
+    const events = eventsSnapshot.docs.map((eventDoc) => ({
+      id: eventDoc.id,
+      ...eventDoc.data(),
+    } as WasteEvent));
+    return buildDailyWasteSummary(events, storeId, selectedDayKey, computedBy);
+  }));
+
+  const batch = writeBatch(services.db);
+  summaries.forEach((summary) => {
+    batch.set(doc(summariesCollection, summary.dayKey), {
+      ...summary,
+      computedAt: serverTimestamp(),
+    });
+  });
+  await batch.commit();
 }
 
 export async function createWasteEvent(event: Omit<WasteEvent, 'id' | 'eventAt'>): Promise<string> {

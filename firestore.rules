@@ -102,6 +102,20 @@ service cloud.firestore {
         && request.resource.data.submittedAt is timestamp;
     }
 
+    function validDailyWasteSummary(storeId, selectedDayKey) {
+      return request.resource.data.keys().hasOnly([
+          'storeId', 'dayKey', 'items', 'sourceEventCount', 'computedAt', 'computedBy'
+        ])
+        && request.resource.data.storeId == storeId
+        && request.resource.data.dayKey == selectedDayKey
+        && request.resource.data.items is list
+        && request.resource.data.items.size() <= 500
+        && request.resource.data.sourceEventCount is int
+        && request.resource.data.sourceEventCount >= 0
+        && request.resource.data.computedAt is timestamp
+        && request.resource.data.computedBy == request.auth.uid;
+    }
+
     match /members/{uid} {
       allow read, write: if false;
     }
@@ -158,6 +172,13 @@ service cloud.firestore {
         allow read: if belongsToStore(storeId);
         allow create, update: if belongsToStore(storeId) && validDonationRecord(storeId);
         allow delete: if belongsToStore(storeId);
+      }
+
+      match /dailyWasteSummaries/{dayKey} {
+        allow read: if belongsToStore(storeId);
+        allow create, update: if belongsToStore(storeId)
+          && validDailyWasteSummary(storeId, dayKey);
+        allow delete: if false;
       }
 
       match /cooldownTimers/{panId} {

@@ -50,7 +50,7 @@ import {
 } from './data';
 import { COOLDOWN_PANS, DEFAULT_SETTINGS } from './defaults';
 import {
-  buildDaypartTopWasteItems,
+  buildDaypartTopWasteItemsFromDailySummaries,
   daypartWaste,
   dayKey,
   cooldownProductQuantity,
@@ -83,6 +83,7 @@ import { useAuthUser, useDeviceName, useDonationDayData, useMember, useNow, useO
 import type {
   AppSettings,
   CooldownTimer,
+  DailyWasteSummary,
   DaypartId,
   DiscardEvent,
   DonationRecord,
@@ -737,9 +738,9 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
           <WasteTab
             settings={settings}
             events={storeData.todayWaste}
-            monthToDateEvents={storeData.monthToDateWaste}
+            monthToDateSummaries={storeData.monthToDateSummaries}
             monthStartDayKey={storeData.monthStart}
-            monthEndDayKey={storeData.today}
+            monthCompletedThrough={storeData.monthCompletedThrough}
             discardEvents={storeData.discardEvents}
             cooldownTimers={storeData.cooldownTimers}
             testMode={testDaypartEnabled}
@@ -889,9 +890,9 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
 function WasteTab({
   settings,
   events,
-  monthToDateEvents,
+  monthToDateSummaries,
   monthStartDayKey,
-  monthEndDayKey,
+  monthCompletedThrough,
   discardEvents,
   cooldownTimers,
   testMode,
@@ -909,9 +910,9 @@ function WasteTab({
 }: {
   settings: AppSettings;
   events: WasteEvent[];
-  monthToDateEvents: WasteEvent[];
+  monthToDateSummaries: DailyWasteSummary[];
   monthStartDayKey: string;
-  monthEndDayKey: string;
+  monthCompletedThrough: string;
   discardEvents: DiscardEvent[];
   cooldownTimers: CooldownTimer[];
   testMode: boolean;
@@ -934,16 +935,20 @@ function WasteTab({
     product.menus.includes(effectiveMenu) && !product.discardOnly
   ));
   const daypart = settings.dayparts.find((candidate) => candidate.id === targetDaypartId)!;
-  const monthToDateTopWaste = buildDaypartTopWasteItems(
-    monthToDateEvents,
+  const monthToDateTopWaste = buildDaypartTopWasteItemsFromDailySummaries(
+    monthToDateSummaries,
     settings,
-    monthStartDayKey,
-    monthEndDayKey,
   );
   const monthToDateLabel = new Date(`${monthStartDayKey}T12:00:00`).toLocaleDateString([], {
     month: 'long',
     year: 'numeric',
   });
+  const monthToDateCoverage = monthCompletedThrough
+    ? `Through ${new Date(`${monthCompletedThrough}T12:00:00`).toLocaleDateString([], {
+      month: 'short',
+      day: 'numeric',
+    })}`
+    : 'No completed days yet';
   const displayedEvents = testMode ? testEvents : events;
   const menuEvents = displayedEvents.filter((event) => event.menu === effectiveMenu);
   const coolDownDaypartEvents = displayedEvents.filter((event) => event.daypartId === targetDaypartId);
@@ -1244,7 +1249,9 @@ function WasteTab({
         <section className="mtd-waste-summary" aria-labelledby="mtd-waste-title">
           <div className="section-heading activity-heading">
             <div>
-              <p className="eyebrow">{monthToDateLabel} · Cool Down only · Sundays excluded</p>
+              <p className="eyebrow">
+                {monthToDateLabel} · {monthToDateCoverage} · Updated daily · Cool Down only
+              </p>
               <h2 id="mtd-waste-title">Month-to-date top waste by daypart</h2>
             </div>
           </div>

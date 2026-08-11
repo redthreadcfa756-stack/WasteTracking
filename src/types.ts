@@ -95,6 +95,22 @@ export interface WasteEvent {
   createdByName: string;
 }
 
+export interface DailyWasteSummaryItem {
+  daypartId: DaypartId;
+  productId: string;
+  productName: string;
+  totalCost: number;
+}
+
+export interface DailyWasteSummary {
+  storeId: string;
+  dayKey: string;
+  items: DailyWasteSummaryItem[];
+  sourceEventCount: number;
+  computedAt: Timestamp | Date | null;
+  computedBy: string;
+}
+
 export interface DiscardEvent extends WasteEvent {
   reason: DiscardReason;
   reasonDetail: string;

@@ -60,7 +60,7 @@ Admin can configure case cost, case weight, and per-unit weights in ounces, poun
 
 Breakfast Cool Down entries use the shared four-pan timer system: grilled breakfast items and eggs use Pan 1, nuggets use Pan 2, breakfast filets use Pan 3, and breakfast spicy uses Pan 4.
 
-Below Recent Activity, the Cool Down page shows the live month-to-date highest-cost product for every daypart. The summary uses net Cool Down dollars, excludes Sundays, and updates from the same Firestore `wasteEvents` data used by the export.
+Below Recent Activity, the Cool Down page shows the month-to-date highest-cost product for every daypart through the previous completed operating day. The first connected device each day converts any missing completed-day Cool Down events into compact `dailyWasteSummaries`; every device then reads at most one small record per operating day rather than re-reading every tap. Sundays and the current, incomplete day are excluded.
 
 Expired-pan alarms sound an initial set of beeps, announce which pan needs to be wrapped and placed in the walk-in, and then continue beeping. They are suppressed while the Donations or Admin tab is open. If the pan is still expired after returning to an operational tab, the alarm is presented then. Alarm audio is primed silently, and online startup waits for Firestore to confirm timer state so stale cached timers cannot produce false alarms.
 

@@ -1,6 +1,8 @@
 import type {
   AppSettings,
   CooldownTimer,
+  DailyWasteSummary,
+  DailyWasteSummaryItem,
   DaypartConfig,
   DaypartId,
   DonationItemConfig,
@@ -473,26 +475,12 @@ export interface DaypartTopWasteItem {
   totalCost: number;
 }
 
-export function buildDaypartTopWasteItems(
-  events: WasteEvent[],
-  settings: AppSettings,
-  startDayKey: string,
-  endDayKey: string,
-): DaypartTopWasteItem[] {
-  const productNames = new Map(settings.products.map((product) => [product.id, product.name]));
-  const totals = new Map<string, { productId: string; productName: string; totalCost: number }>();
-  events.forEach((event) => {
-    if (event.dayKey < startDayKey || event.dayKey > endDayKey || !isOperatingDayKey(event.dayKey)) return;
-    const key = `${event.daypartId}|${event.productId}`;
-    const current = totals.get(key) || {
-      productId: event.productId,
-      productName: productNames.get(event.productId) || event.productName,
-      totalCost: 0,
-    };
-    current.totalCost += event.equivalentUnits * event.unitCostSnapshot;
-    totals.set(key, current);
-  });
+type DaypartProductCost = { productId: string; productName: string; totalCost: number };
 
+function daypartTopWasteItemsFromTotals(
+  totals: Map<string, DaypartProductCost>,
+  settings: AppSettings,
+): DaypartTopWasteItem[] {
   return settings.dayparts.map((daypart) => {
     const highest = [...totals.entries()]
       .filter(([key, product]) => key.startsWith(`${daypart.id}|`) && product.totalCost > 0)
@@ -506,6 +494,86 @@ export function buildDaypartTopWasteItems(
       totalCost: highest?.totalCost || 0,
     };
   });
+}
+
+export function buildDaypartTopWasteItems(
+  events: WasteEvent[],
+  settings: AppSettings,
+  startDayKey: string,
+  endDayKey: string,
+): DaypartTopWasteItem[] {
+  const productNames = new Map(settings.products.map((product) => [product.id, product.name]));
+  const totals = new Map<string, DaypartProductCost>();
+  events.forEach((event) => {
+    if (event.dayKey < startDayKey || event.dayKey > endDayKey || !isOperatingDayKey(event.dayKey)) return;
+    const key = `${event.daypartId}|${event.productId}`;
+    const current = totals.get(key) || {
+      productId: event.productId,
+      productName: productNames.get(event.productId) || event.productName,
+      totalCost: 0,
+    };
+    current.totalCost += event.equivalentUnits * event.unitCostSnapshot;
+    totals.set(key, current);
+  });
+
+  return daypartTopWasteItemsFromTotals(totals, settings);
+}
+
+export function buildDailyWasteSummary(
+  events: WasteEvent[],
+  storeId: string,
+  selectedDayKey: string,
+  computedBy: string,
+): DailyWasteSummary {
+  const totals = new Map<string, DailyWasteSummaryItem>();
+  const sourceEvents = isOperatingDayKey(selectedDayKey)
+    ? events.filter((event) => event.dayKey === selectedDayKey)
+    : [];
+
+  sourceEvents.forEach((event) => {
+    const key = `${event.daypartId}|${event.productId}`;
+    const current = totals.get(key) || {
+      daypartId: event.daypartId,
+      productId: event.productId,
+      productName: event.productName,
+      totalCost: 0,
+    };
+    current.totalCost += event.equivalentUnits * event.unitCostSnapshot;
+    totals.set(key, current);
+  });
+
+  return {
+    storeId,
+    dayKey: selectedDayKey,
+    items: [...totals.values()].sort((a, b) => (
+      a.daypartId.localeCompare(b.daypartId) || a.productName.localeCompare(b.productName)
+    )),
+    sourceEventCount: sourceEvents.length,
+    computedAt: null,
+    computedBy,
+  };
+}
+
+export function buildDaypartTopWasteItemsFromDailySummaries(
+  summaries: DailyWasteSummary[],
+  settings: AppSettings,
+): DaypartTopWasteItem[] {
+  const productNames = new Map(settings.products.map((product) => [product.id, product.name]));
+  const totals = new Map<string, DaypartProductCost>();
+  summaries.forEach((summary) => {
+    if (!isOperatingDayKey(summary.dayKey)) return;
+    summary.items.forEach((item) => {
+      const key = `${item.daypartId}|${item.productId}`;
+      const current = totals.get(key) || {
+        productId: item.productId,
+        productName: productNames.get(item.productId) || item.productName,
+        totalCost: 0,
+      };
+      current.totalCost += item.totalCost;
+      totals.set(key, current);
+    });
+  });
+  return daypartTopWasteItemsFromTotals(totals, settings);
 }
 
 export interface ProductCaseProjection {
