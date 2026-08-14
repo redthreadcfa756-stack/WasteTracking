@@ -7,6 +7,7 @@ export type WeightUnit = 'oz' | 'lb' | 'g';
 export type MemberRole = 'employee' | 'admin';
 export type CooldownPanId = 'pan-1' | 'pan-2' | 'pan-3' | 'pan-4';
 export type DiscardReason = 'dropped' | 'raw' | 'overcooked' | 'contaminated' | 'quality' | 'other';
+export type DaypartUsageOutcome = 'zero-waste' | 'missed-waste' | 'uncertain';
 
 export interface ProductConfig {
   id: string;
@@ -141,6 +142,16 @@ export interface DonationRecord {
   submittedBy: string;
   submittedByName: string;
   revision: number;
+}
+
+export interface UsageDayRecord {
+  storeId: string;
+  dayKey: string;
+  activeSlotKeys?: string[];
+  zeroWasteDaypartIds?: DaypartId[];
+  missedWasteDaypartIds?: DaypartId[];
+  uncertainWasteDaypartIds?: DaypartId[];
+  updatedAt: Timestamp | Date | null;
 }
 
 export interface MergedActivity {

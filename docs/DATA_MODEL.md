@@ -19,6 +19,10 @@ stores/{storeId}
     one overwriteable hourly average
   donationRecords/{YYYY-MM-DD}
     one overwriteable final record with actuals, prediction snapshot, variance, initials
+  usageDays/{YYYY-MM-DD}
+    activeSlotKeys[], zeroWasteDaypartIds[], missedWasteDaypartIds[],
+    uncertainWasteDaypartIds[], updatedAt,
+    lastRecordedBy, lastDeviceName
   cooldownTimers/{panId}
     one shared pan timer with its expiry, participating products, and
     productQuantities{productId: equivalentUnits}
@@ -37,6 +41,8 @@ Discard taps use their own immutable collection. They count together with Cool D
 SOS document IDs are deterministic by date and daypart. Re-entering a daypart updates the same record. Older hourly records remain readable.
 
 Donation document IDs are deterministic by count date. Resubmitting replaces the same final document and increments its revision; it does not create duplicate final counts.
+
+Usage-day document IDs are deterministic by date. While at least one visible device is on Cool Down, the first device reaching a 15-minute operating slot adds that slot with an atomic array operation, preventing devices from replacing one another’s evidence and allowing the write to queue offline. Completed dayparts with no Cool Down entries are reviewed as genuine zero waste, known missed logging, or uncertain. The three outcome arrays are updated atomically as mutually exclusive responses, and staff can revise the response without changing waste quantities. These raw signals remain separate from the calculated score so future scoring changes do not require rewriting historical evidence. Direct discard is excluded from donation reconciliation.
 
 Every read and write is scoped through the signed-in user’s `members/{uid}.storeId`. Only a member whose role is `admin` may update shared settings. Admin-panel entry also reauthenticates the current Firebase password every time the tab is entered.
 

@@ -116,6 +116,27 @@ service cloud.firestore {
         && request.resource.data.computedBy == request.auth.uid;
     }
 
+    function validUsageDay(storeId, selectedDayKey) {
+      return request.resource.data.keys().hasOnly([
+          'storeId', 'dayKey', 'activeSlotKeys', 'zeroWasteDaypartIds',
+          'missedWasteDaypartIds', 'uncertainWasteDaypartIds', 'updatedAt',
+          'lastRecordedBy', 'lastDeviceName'
+        ])
+        && request.resource.data.storeId == storeId
+        && request.resource.data.dayKey == selectedDayKey
+        && (!request.resource.data.keys().hasAny(['activeSlotKeys'])
+          || (request.resource.data.activeSlotKeys is list && request.resource.data.activeSlotKeys.size() <= 80))
+        && (!request.resource.data.keys().hasAny(['zeroWasteDaypartIds'])
+          || (request.resource.data.zeroWasteDaypartIds is list && request.resource.data.zeroWasteDaypartIds.size() <= 5))
+        && (!request.resource.data.keys().hasAny(['missedWasteDaypartIds'])
+          || (request.resource.data.missedWasteDaypartIds is list && request.resource.data.missedWasteDaypartIds.size() <= 5))
+        && (!request.resource.data.keys().hasAny(['uncertainWasteDaypartIds'])
+          || (request.resource.data.uncertainWasteDaypartIds is list && request.resource.data.uncertainWasteDaypartIds.size() <= 5))
+        && request.resource.data.lastRecordedBy == request.auth.uid
+        && request.resource.data.lastDeviceName is string
+        && request.resource.data.updatedAt is timestamp;
+    }
+
     match /members/{uid} {
       allow read, write: if false;
     }
@@ -178,6 +199,13 @@ service cloud.firestore {
         allow read: if belongsToStore(storeId);
         allow create, update: if belongsToStore(storeId)
           && validDailyWasteSummary(storeId, dayKey);
+        allow delete: if false;
+      }
+
+      match /usageDays/{dayKey} {
+        allow read: if belongsToStore(storeId);
+        allow create, update: if belongsToStore(storeId)
+          && validUsageDay(storeId, dayKey);
         allow delete: if false;
       }
 

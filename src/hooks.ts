@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { User } from 'firebase/auth';
-import { ensureDailyWasteSummaries, observeAuth, subscribeCooldownTimers, subscribeDailyWasteSummaries, subscribeDiscardForDay, subscribeDonationRecord, subscribeSettings, subscribeSosForDay, subscribeWasteForDay } from './data';
+import { ensureDailyWasteSummaries, observeAuth, subscribeCooldownTimers, subscribeDailyWasteSummaries, subscribeDiscardForDay, subscribeDonationRecord, subscribeSettings, subscribeSosForDay, subscribeUsageDay, subscribeWasteForDay } from './data';
 import { DEFAULT_DONATION_ITEMS, DEFAULT_PRODUCTS, PRODUCT_TONES } from './defaults';
 import { dayKey, donationWindowDayKeys, withDerivedProductPricing } from './domain';
-import type { AppSettings, CooldownTimer, DailyWasteSummary, DiscardEvent, DonationRecord, MemberProfile, SosEntry, WasteEvent } from './types';
+import type { AppSettings, CooldownTimer, DailyWasteSummary, DiscardEvent, DonationRecord, MemberProfile, SosEntry, UsageDayRecord, WasteEvent } from './types';
 
 export function useAuthUser() {
   const [user, setUser] = useState<User | null>(null);
@@ -137,6 +137,68 @@ export function useDonationDayData(storeId: string, selectedDayKey: string) {
     error,
     loading: loadedDayKey !== selectedDayKey,
     previousDayKey: windowDays.previous,
+  };
+}
+
+export function useUsageData(storeId: string, selectedDayKey: string) {
+  const previousDay = donationWindowDayKeys(selectedDayKey).previous;
+  const [record, setRecord] = useState<UsageDayRecord | null>(null);
+  const [previousWaste, setPreviousWaste] = useState<WasteEvent[]>([]);
+  const [donationRecord, setDonationRecord] = useState<DonationRecord | null>(null);
+  const [readyParts, setReadyParts] = useState(0);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let disposed = false;
+    let usageReady = false;
+    let wasteReady = false;
+    let donationReady = false;
+    const markReady = () => {
+      if (!disposed && usageReady && wasteReady && donationReady) setReadyParts(3);
+    };
+    const handleError = (caught: { message: string }) => {
+      if (!disposed) setError(caught.message);
+    };
+
+    setRecord(null);
+    setPreviousWaste([]);
+    setDonationRecord(null);
+    setReadyParts(0);
+    setError('');
+
+    const subscriptions = [
+      subscribeUsageDay(storeId, selectedDayKey, (nextRecord) => {
+        if (disposed) return;
+        setRecord(nextRecord);
+        usageReady = true;
+        markReady();
+      }, handleError),
+      subscribeWasteForDay(storeId, previousDay, (events) => {
+        if (disposed) return;
+        setPreviousWaste(events);
+        wasteReady = true;
+        markReady();
+      }, handleError),
+      subscribeDonationRecord(storeId, selectedDayKey, (nextRecord) => {
+        if (disposed) return;
+        setDonationRecord(nextRecord);
+        donationReady = true;
+        markReady();
+      }, handleError),
+    ];
+
+    return () => {
+      disposed = true;
+      subscriptions.forEach((unsubscribe) => unsubscribe());
+    };
+  }, [previousDay, selectedDayKey, storeId]);
+
+  return {
+    record,
+    previousWaste,
+    donationRecord,
+    loading: readyParts < 3,
+    error,
   };
 }
 

@@ -1192,6 +1192,99 @@ label,
   font-weight: 700;
 }
 
+.usage-score-section {
+  display: grid;
+  gap: 0.8rem;
+  margin-top: 0.45rem;
+}
+
+.usage-score-hero {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem;
+  border-left: 8px solid #718792;
+  background: #fff;
+}
+
+.usage-score-hero.status-reliable { border-color: var(--success); }
+.usage-score-hero.status-provisional { border-color: #34729a; }
+.usage-score-hero.status-caution { border-color: #d49000; }
+.usage-score-hero.status-unreliable { border-color: var(--danger); }
+.usage-score-hero > div:nth-child(2) { display: grid; gap: 0.2rem; }
+.usage-score-hero > div:nth-child(2) > strong { font-family: "Space Grotesk", Inter, sans-serif; text-transform: uppercase; }
+.usage-score-hero > div:nth-child(2) > span { color: var(--muted); font-size: 0.82rem; }
+
+.usage-score-number { display: flex; align-items: baseline; gap: 0.25rem; min-width: 92px; }
+.usage-score-number strong { font-family: "Space Grotesk", Inter, sans-serif; font-size: 2.75rem; line-height: 0.9; letter-spacing: -0.06em; }
+.usage-score-number span { color: var(--muted); font-size: 0.75rem; font-weight: 800; }
+.usage-eligibility-badge,
+.usage-confirmed {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.usage-eligibility-badge svg,
+.usage-confirmed svg { width: 16px; height: 16px; }
+.status-reliable .usage-eligibility-badge,
+.usage-confirmed { color: var(--success); }
+
+.usage-component-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+.usage-component-grid .stat { min-width: 0; }
+
+.usage-daypart-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(175px, 1fr));
+  gap: 0.65rem;
+}
+.usage-daypart-card {
+  display: grid;
+  align-content: start;
+  gap: 0.55rem;
+  min-width: 0;
+  padding: 0.85rem;
+  border-top: 5px solid #718792;
+  background: #fff;
+}
+.usage-daypart-card.needs-confirmation { border-color: #d49000; background: #fff9e9; }
+.usage-daypart-card.usage-failed { border-color: var(--danger); background: #fff4f5; }
+.usage-daypart-card > div:first-child { display: flex; align-items: baseline; justify-content: space-between; gap: 0.6rem; }
+.usage-daypart-card > div:first-child span { color: var(--muted); font-size: 0.72rem; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; }
+.usage-daypart-card > div:first-child strong { font-family: "Space Grotesk", Inter, sans-serif; font-size: 1.55rem; }
+.usage-daypart-card > small { color: var(--muted); line-height: 1.35; }
+.usage-daypart-card .secondary-button { width: 100%; white-space: normal; }
+.usage-outcome-failed {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--danger);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.usage-outcome-failed svg { width: 16px; height: 16px; }
+
+.usage-review-options { display: grid; gap: 0.65rem; }
+.usage-review-options button { width: 100%; white-space: normal; }
+.usage-review-options .usage-missed-button { color: var(--danger); border: 1px solid #efb9c1; background: #fff4f5; }
+.usage-review-note { margin-bottom: 0; font-size: 0.8rem; }
+
+.usage-score-details { padding: 0.85rem 1rem; border-left: 7px solid #718792; background: #fff; }
+.usage-score-details summary { cursor: pointer; font-family: "Space Grotesk", Inter, sans-serif; font-weight: 800; text-transform: uppercase; }
+.usage-score-details ul { margin: 0.8rem 0; padding-left: 1.2rem; color: var(--muted); line-height: 1.55; }
+.usage-score-details p { margin: 0; color: var(--muted); font-size: 0.8rem; line-height: 1.5; }
+
 @media (min-width: 760px) {
   .tabbar {
     top: calc(68px + env(safe-area-inset-top));
@@ -1204,6 +1297,10 @@ label,
 }
 
 @media (max-width: 759px) {
+  .usage-score-hero { grid-template-columns: auto minmax(0, 1fr); }
+  .usage-eligibility-badge { grid-column: 1 / -1; }
+  .usage-component-grid { grid-template-columns: 1fr; }
+
   .admin-strip {
     grid-template-columns: 1fr;
   }

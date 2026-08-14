@@ -9,6 +9,7 @@ import type {
   DonationRecord,
   MergedActivity,
   ProductConfig,
+  UsageDayRecord,
   WeightUnit,
   WasteEvent,
 } from './types';
@@ -316,6 +317,231 @@ export function donationPrediction(
     if (item.unit === 'each') return total + units;
     return total + units * (productMap.get(productId)?.averageWeightLb || 0);
   }, 0);
+}
+
+export const USAGE_RELIABLE_MINIMUM = 90;
+export const USAGE_CAUTION_MINIMUM = 75;
+export const USAGE_DONATION_TOLERANCE = 0.25;
+
+export type UsageScoreStatus = 'reliable' | 'provisional' | 'caution' | 'unreliable';
+
+export interface DaypartUsageScore {
+  daypartId: DaypartId;
+  label: string;
+  score: number;
+  coverageScore: number;
+  continuityScore: number;
+  activeSlots: number;
+  expectedSlots: number;
+  eventCount: number;
+  longestUnloggedHours: number;
+  completed: boolean;
+  confirmedZeroWaste: boolean;
+  missedWaste: boolean;
+  uncertainWaste: boolean;
+  needsUsageReview: boolean;
+  reasons: string[];
+}
+
+export interface UsageScoreResult {
+  score: number;
+  status: UsageScoreStatus;
+  reportEligible: boolean;
+  minimumRequired: number;
+  coverageScore: number;
+  continuityScore: number;
+  donationScore: number | null;
+  dayparts: DaypartUsageScore[];
+  reasons: string[];
+}
+
+export function usagePresenceSlotKey(daypartId: DaypartId, startMinutes: number): string {
+  return `${daypartId}_${String(startMinutes).padStart(4, '0')}`;
+}
+
+export function currentUsagePresenceSlot(
+  dayparts: DaypartConfig[],
+  date = new Date(),
+): { daypartId: DaypartId; slotKey: string } | null {
+  const minutes = date.getHours() * 60 + date.getMinutes();
+  const daypart = dayparts.find((candidate) => (
+    minutes >= candidate.startMinutes && minutes < candidate.endMinutes
+  ));
+  if (!daypart) return null;
+  const slotStart = daypart.startMinutes
+    + Math.floor((minutes - daypart.startMinutes) / 15) * 15;
+  return {
+    daypartId: daypart.id,
+    slotKey: usagePresenceSlotKey(daypart.id, slotStart),
+  };
+}
+
+function longestFalseRun(values: boolean[]): number {
+  let longest = 0;
+  let current = 0;
+  values.forEach((value) => {
+    current = value ? 0 : current + 1;
+    longest = Math.max(longest, current);
+  });
+  return longest;
+}
+
+export function buildUsageScore({
+  settings,
+  selectedDayKey,
+  now,
+  currentWaste,
+  previousWaste,
+  donationRecord,
+  usageRecord,
+}: {
+  settings: AppSettings;
+  selectedDayKey: string;
+  now: Date;
+  currentWaste: WasteEvent[];
+  previousWaste: WasteEvent[];
+  donationRecord: DonationRecord | null;
+  usageRecord: UsageDayRecord | null;
+}): UsageScoreResult {
+  const currentDayKey = dayKey(now);
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  const dayparts = settings.dayparts.flatMap<DaypartUsageScore>((daypart) => {
+    const elapsedEnd = selectedDayKey < currentDayKey
+      ? daypart.endMinutes
+      : selectedDayKey > currentDayKey
+        ? daypart.startMinutes
+        : Math.min(daypart.endMinutes, Math.max(daypart.startMinutes, nowMinutes));
+    if (elapsedEnd <= daypart.startMinutes) return [];
+
+    const expectedSlotKeys: string[] = [];
+    for (let cursor = daypart.startMinutes; cursor < elapsedEnd; cursor += 15) {
+      expectedSlotKeys.push(usagePresenceSlotKey(daypart.id, cursor));
+    }
+    const activeSlots = expectedSlotKeys.filter((slotKey) => usageRecord?.activeSlotKeys?.includes(slotKey)).length;
+    const coverageScore = expectedSlotKeys.length
+      ? activeSlots / expectedSlotKeys.length * 100
+      : 100;
+    const daypartEvents = currentWaste.filter((event) => (
+      event.daypartId === daypart.id && event.equivalentUnits > 0
+    ));
+    const completed = selectedDayKey < currentDayKey
+      || (selectedDayKey === currentDayKey && nowMinutes >= daypart.endMinutes);
+    const confirmedZeroWaste = Boolean(usageRecord?.zeroWasteDaypartIds?.includes(daypart.id));
+    const missedWaste = Boolean(usageRecord?.missedWasteDaypartIds?.includes(daypart.id));
+    const uncertainWaste = Boolean(usageRecord?.uncertainWasteDaypartIds?.includes(daypart.id));
+    const hasRecordedOutcome = confirmedZeroWaste || missedWaste || uncertainWaste;
+    const needsUsageReview = completed && daypartEvents.length === 0 && !hasRecordedOutcome;
+
+    const completedHours: Array<{ start: number; end: number }> = [];
+    for (let cursor = daypart.startMinutes; cursor < daypart.endMinutes; cursor += 60) {
+      const end = Math.min(cursor + 60, daypart.endMinutes);
+      if (end <= elapsedEnd) completedHours.push({ start: cursor, end });
+    }
+    const loggedHours = completedHours.map((hour) => daypartEvents.some((event) => {
+      const occurredAt = eventDate(event.eventAt);
+      const minutes = occurredAt.getHours() * 60 + occurredAt.getMinutes();
+      return minutes >= hour.start && minutes < hour.end;
+    }));
+    const longestUnloggedHours = confirmedZeroWaste ? 0 : longestFalseRun(loggedHours);
+    const continuityScore = confirmedZeroWaste
+      ? 100
+      : needsUsageReview || missedWaste || uncertainWaste
+        ? 0
+        : Math.max(0, 100 - Math.max(0, longestUnloggedHours - 2) * 25);
+    const score = Math.round((coverageScore * 45 + continuityScore * 25) / 70);
+    const reasons: string[] = [];
+    if (coverageScore < USAGE_RELIABLE_MINIMUM) {
+      reasons.push(`${activeSlots} of ${expectedSlotKeys.length} presence checks recorded`);
+    }
+    if (needsUsageReview) reasons.push('No Cool Down waste logged and the daypart has not been reviewed');
+    else if (missedWaste) reasons.push('Team reported that waste occurred but was not logged');
+    else if (uncertainWaste) reasons.push('Team could not confirm whether the empty daypart was accurate');
+    else if (longestUnloggedHours > 2) reasons.push(`${longestUnloggedHours} consecutive hours without a Cool Down entry`);
+
+    return [{
+      daypartId: daypart.id,
+      label: daypart.label,
+      score,
+      coverageScore: Math.round(coverageScore),
+      continuityScore: Math.round(continuityScore),
+      activeSlots,
+      expectedSlots: expectedSlotKeys.length,
+      eventCount: daypartEvents.length,
+      longestUnloggedHours,
+      completed,
+      confirmedZeroWaste,
+      missedWaste,
+      uncertainWaste,
+      needsUsageReview,
+      reasons,
+    }];
+  });
+
+  const totalExpectedSlots = dayparts.reduce((sum, daypart) => sum + daypart.expectedSlots, 0);
+  const totalActiveSlots = dayparts.reduce((sum, daypart) => sum + daypart.activeSlots, 0);
+  const coverageScore = totalExpectedSlots ? totalActiveSlots / totalExpectedSlots * 100 : 0;
+  const continuityWeight = dayparts.reduce((sum, daypart) => sum + Math.max(1, Math.ceil(daypart.expectedSlots / 4)), 0);
+  const continuityScore = continuityWeight
+    ? dayparts.reduce((sum, daypart) => (
+      sum + daypart.continuityScore * Math.max(1, Math.ceil(daypart.expectedSlots / 4))
+    ), 0) / continuityWeight
+    : 0;
+
+  let donationScore: number | null = null;
+  const donationReasons: string[] = [];
+  if (donationRecord) {
+    const comparableItems = settings.donationItems.filter((item) => item.sourceProductIds.length > 0);
+    const itemScores = comparableItems.flatMap((item) => {
+      const actual = Math.max(0, donationRecord.actuals[item.id] || 0);
+      const tracked = Math.max(0, donationPrediction(item, settings, previousWaste, currentWaste) || 0);
+      if (actual <= 0) return [];
+      const fullCreditAt = actual * (1 - USAGE_DONATION_TOLERANCE);
+      const itemScore = fullCreditAt <= 0 ? 100 : Math.min(100, tracked / fullCreditAt * 100);
+      if (itemScore < 99.5) {
+        donationReasons.push(`${item.name}: tracked ${formatQuantity(tracked)} vs donated ${formatQuantity(actual)}`);
+      }
+      return [itemScore];
+    });
+    donationScore = itemScores.length
+      ? itemScores.reduce((sum, score) => sum + score, 0) / itemScores.length
+      : 100;
+  }
+
+  const baseWeighted = coverageScore * 45 + continuityScore * 25;
+  const score = Math.round(donationScore === null
+    ? baseWeighted / 70
+    : (baseWeighted + donationScore * 30) / 100);
+  const hasCriticalGap = dayparts.some((daypart) => (
+    daypart.needsUsageReview || daypart.missedWaste || daypart.uncertainWaste
+  ));
+  const donationPasses = donationScore !== null && donationScore >= 80;
+  const reportEligible = score >= USAGE_RELIABLE_MINIMUM && !hasCriticalGap && donationPasses;
+  const status: UsageScoreStatus = reportEligible
+    ? 'reliable'
+    : score >= USAGE_RELIABLE_MINIMUM && donationScore === null && !hasCriticalGap
+      ? 'provisional'
+      : score >= USAGE_CAUTION_MINIMUM
+        ? 'caution'
+        : 'unreliable';
+  const reasons = [
+    ...dayparts.flatMap((daypart) => daypart.reasons.map((reason) => `${daypart.label}: ${reason}`)),
+    ...donationReasons,
+  ];
+  if (!donationRecord) reasons.push('Donation reconciliation is pending for this donation window');
+  else if (donationScore !== null && donationScore < 80) reasons.push('Donation reconciliation is below the required 80%');
+  if (reasons.length === 0) reasons.push('Presence, continuity, and donations all support reliable reporting');
+
+  return {
+    score,
+    status,
+    reportEligible,
+    minimumRequired: USAGE_RELIABLE_MINIMUM,
+    coverageScore: Math.round(coverageScore),
+    continuityScore: Math.round(continuityScore),
+    donationScore: donationScore === null ? null : Math.round(donationScore),
+    dayparts,
+    reasons,
+  };
 }
 
 export function targetDollarForProduct(product: ProductConfig, targetQuantity: number): number {

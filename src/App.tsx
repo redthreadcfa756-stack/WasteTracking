@@ -31,6 +31,7 @@ import type { User } from 'firebase/auth';
 import {
   createDiscardEvent,
   createWasteEvent,
+  recordDaypartUsageOutcome,
   loadDonationRecordsForDateRange,
   loadDemoDonationRecordsForDateRange,
   loadDemoWasteForDateRange,
@@ -42,6 +43,7 @@ import {
   removeExportDemoData,
   resetAllCooldownTimers,
   resetCooldownTimer,
+  recordUsageHeartbeat,
   saveDonationRecord,
   saveSettings,
   saveSosEntry,
@@ -52,9 +54,11 @@ import {
 import { COOLDOWN_PANS, DEFAULT_SETTINGS } from './defaults';
 import {
   buildDaypartTopWasteItemsFromDailySummaries,
+  buildUsageScore,
   daypartWaste,
   dayKey,
   cooldownProductQuantity,
+  currentUsagePresenceSlot,
   buildWasteTrend,
   detectDaypart,
   displayProductQuantity,
@@ -80,12 +84,13 @@ import {
 } from './domain';
 import { createDonationWorkbook, createWasteTrendWorkbook } from './exportWorkbook';
 import { firebaseConfigured } from './firebase';
-import { useAuthUser, useDeviceName, useDonationDayData, useMember, useNow, useOnlineStatus, useStoreData } from './hooks';
+import { useAuthUser, useDeviceName, useDonationDayData, useMember, useNow, useOnlineStatus, useStoreData, useUsageData } from './hooks';
 import type {
   AppSettings,
   CooldownTimer,
   DailyWasteSummary,
   DaypartId,
+  DaypartUsageOutcome,
   DiscardEvent,
   DonationRecord,
   MemberProfile,
@@ -842,6 +847,8 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
           <WasteTab
             settings={settings}
             events={storeData.todayWaste}
+            currentDay={storeData.today}
+            now={now}
             monthToDateSummaries={storeData.monthToDateSummaries}
             monthStartDayKey={storeData.monthStart}
             monthCompletedThrough={storeData.monthCompletedThrough}
@@ -1005,6 +1012,8 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
 function WasteTab({
   settings,
   events,
+  currentDay,
+  now,
   monthToDateSummaries,
   monthStartDayKey,
   monthCompletedThrough,
@@ -1025,6 +1034,8 @@ function WasteTab({
 }: {
   settings: AppSettings;
   events: WasteEvent[];
+  currentDay: string;
+  now: Date;
   monthToDateSummaries: DailyWasteSummary[];
   monthStartDayKey: string;
   monthCompletedThrough: string;
@@ -1045,7 +1056,11 @@ function WasteTab({
 }) {
   const [nuggetPicker, setNuggetPicker] = useState<ProductConfig | null>(null);
   const [pendingPanQuantities, setPendingPanQuantities] = useState<Record<string, number>>({});
+  const [usageConfirmationBusy, setUsageConfirmationBusy] = useState<DaypartId | null>(null);
+  const [usageReviewDaypart, setUsageReviewDaypart] = useState<DaypartId | null>(null);
   const previousServerPanQuantities = useRef<Record<string, number> | null>(null);
+  const attemptedPresenceSlot = useRef('');
+  const usageData = useUsageData(member.storeId, currentDay);
   const products = settings.products.filter((product) => (
     product.menus.includes(effectiveMenu) && !product.discardOnly
   ));
@@ -1077,6 +1092,16 @@ function WasteTab({
   const varianceDetail = Math.abs(targetVariance) < 0.005
     ? 'On target'
     : `${formatMoney(Math.abs(targetVariance))} ${targetVariance > 0 ? 'over' : 'under'} target`;
+  const presenceSlot = currentUsagePresenceSlot(settings.dayparts, now);
+  const usageScore = useMemo(() => buildUsageScore({
+    settings,
+    selectedDayKey: currentDay,
+    now,
+    currentWaste: events,
+    previousWaste: usageData.previousWaste,
+    donationRecord: usageData.donationRecord,
+    usageRecord: usageData.record,
+  }), [currentDay, events, now, settings, usageData.donationRecord, usageData.previousWaste, usageData.record]);
   const serverPanQuantities = Object.fromEntries(settings.products.map((product) => {
     const pan = COOLDOWN_PANS.find((candidate) => candidate.productIds.includes(product.id));
     const activeTimer = pan
@@ -1087,6 +1112,54 @@ function WasteTab({
   const serverPanSignature = settings.products
     .map((product) => `${product.id}:${serverPanQuantities[product.id] || 0}`)
     .join('|');
+
+  useEffect(() => {
+    if (testMode || !presenceSlot || !isOperatingDayKey(currentDay)) return;
+    const recordPresence = () => {
+      if (
+        document.visibilityState !== 'visible'
+        || usageData.record?.activeSlotKeys?.includes(presenceSlot.slotKey)
+        || attemptedPresenceSlot.current === presenceSlot.slotKey
+      ) return;
+      attemptedPresenceSlot.current = presenceSlot.slotKey;
+      void recordUsageHeartbeat({
+        storeId: member.storeId,
+        selectedDayKey: currentDay,
+        slotKey: presenceSlot.slotKey,
+        deviceName,
+        recordedBy: member.uid,
+      }).catch((caught) => notify(`Usage tracking: ${errorMessage(caught)}`));
+    };
+
+    recordPresence();
+    document.addEventListener('visibilitychange', recordPresence);
+    return () => document.removeEventListener('visibilitychange', recordPresence);
+  }, [currentDay, deviceName, member.storeId, member.uid, notify, presenceSlot?.slotKey, testMode, usageData.record]);
+
+  const saveDaypartUsageOutcome = async (daypartId: DaypartId, outcome: DaypartUsageOutcome) => {
+    setUsageConfirmationBusy(daypartId);
+    try {
+      await recordDaypartUsageOutcome({
+        storeId: member.storeId,
+        selectedDayKey: currentDay,
+        daypartId,
+        outcome,
+        deviceName,
+        recordedBy: member.uid,
+      });
+      const message = outcome === 'zero-waste'
+        ? 'Zero Cool Down waste confirmed for that daypart.'
+        : outcome === 'missed-waste'
+          ? 'Known missed logging recorded. This daypart is not statistics eligible.'
+          : 'Uncertain daypart recorded. This daypart is not statistics eligible.';
+      notify(message);
+      setUsageReviewDaypart(null);
+    } catch (caught) {
+      notify(errorMessage(caught));
+    } finally {
+      setUsageConfirmationBusy(null);
+    }
+  };
 
   useLayoutEffect(() => {
     const previous = previousServerPanQuantities.current;
@@ -1334,6 +1407,16 @@ function WasteTab({
       />
 
       {!testMode && (
+        <UsageScorePanel
+          score={usageScore}
+          loading={usageData.loading}
+          error={usageData.error}
+          confirmationBusy={usageConfirmationBusy}
+          onReviewDaypart={setUsageReviewDaypart}
+        />
+      )}
+
+      {!testMode && (
         <section className="mtd-waste-summary" aria-labelledby="mtd-waste-title">
           <div className="section-heading activity-heading">
             <div>
@@ -1367,6 +1450,16 @@ function WasteTab({
           mode="cooldown"
           onClose={() => setNuggetPicker(null)}
           onSelect={(count) => void adjustWaste(nuggetPicker, count)}
+        />
+      )}
+      {usageReviewDaypart && (
+        <DaypartUsageReview
+          daypartLabel={settings.dayparts.find((part) => part.id === usageReviewDaypart)?.label || usageReviewDaypart}
+          busy={usageConfirmationBusy === usageReviewDaypart}
+          onClose={() => {
+            if (!usageConfirmationBusy) setUsageReviewDaypart(null);
+          }}
+          onSelect={(outcome) => void saveDaypartUsageOutcome(usageReviewDaypart, outcome)}
         />
       )}
     </section>
@@ -1673,6 +1766,122 @@ function RecentProductActivity({ eyebrow, title, emptyText, entries, products, o
         })}
       </div>
     </>
+  );
+}
+
+function UsageScorePanel({ score, loading, error, confirmationBusy, onReviewDaypart }: {
+  score: ReturnType<typeof buildUsageScore>;
+  loading: boolean;
+  error: string;
+  confirmationBusy: DaypartId | null;
+  onReviewDaypart: (daypartId: DaypartId) => void;
+}) {
+  const statusLabel = score.status === 'reliable'
+    ? 'Reliable for reporting'
+    : score.status === 'provisional'
+      ? 'Provisional · donation pending'
+      : score.status === 'caution'
+        ? 'Caution · potentially incomplete'
+        : 'Unreliable · exclude from trends';
+
+  return (
+    <section className="usage-score-section" aria-labelledby="usage-score-title">
+      <div className="section-heading activity-heading">
+        <div>
+          <p className="eyebrow">Tracking coverage · Continuity · Donation reconciliation</p>
+          <h2 id="usage-score-title">System usage</h2>
+        </div>
+      </div>
+      {error && <div className="error-banner" role="alert">Usage evidence could not sync: {error}</div>}
+      {loading ? (
+        <EmptyState>Loading system usage evidence…</EmptyState>
+      ) : (
+        <>
+          <div className={`usage-score-hero status-${score.status}`}>
+            <div className="usage-score-number">
+              <strong>{score.score}</strong>
+              <span>/ 100</span>
+            </div>
+            <div>
+              <strong>{statusLabel}</strong>
+              <span>Minimum reliable score: {score.minimumRequired}</span>
+            </div>
+            <span className="usage-eligibility-badge">
+              {score.reportEligible ? <Check aria-hidden="true" /> : <AlertTriangle aria-hidden="true" />}
+              {score.reportEligible ? 'Statistics eligible' : 'Not statistics eligible'}
+            </span>
+          </div>
+
+          <div className="usage-component-grid">
+            <Stat label="Cool Down presence" value={`${score.coverageScore}%`} detail="15-minute visible-page checks · 45% of score" />
+            <Stat label="Logging continuity" value={`${score.continuityScore}%`} detail="Unexplained three-hour gaps · 25% of score" />
+            <Stat
+              label="Donation reconciliation"
+              value={score.donationScore === null ? 'Pending' : `${score.donationScore}%`}
+              detail="25% weight tolerance · 30% of score"
+              tone={score.donationScore !== null && score.donationScore < 80 ? 'danger' : undefined}
+            />
+          </div>
+
+          <div className="usage-daypart-grid">
+            {score.dayparts.map((daypart) => (
+              <article className={`usage-daypart-card${daypart.needsUsageReview ? ' needs-confirmation' : ''}${daypart.missedWaste || daypart.uncertainWaste ? ' usage-failed' : ''}`} key={daypart.daypartId}>
+                <div>
+                  <span>{daypart.label}</span>
+                  <strong>{daypart.score}</strong>
+                </div>
+                <small>{daypart.activeSlots}/{daypart.expectedSlots} presence checks · {daypart.eventCount} entries</small>
+                {daypart.confirmedZeroWaste && <span className="usage-confirmed"><Check aria-hidden="true" /> Zero waste confirmed</span>}
+                {daypart.missedWaste && <span className="usage-outcome-failed"><AlertTriangle aria-hidden="true" /> Waste was not logged</span>}
+                {daypart.uncertainWaste && <span className="usage-outcome-failed"><AlertTriangle aria-hidden="true" /> Accuracy is uncertain</span>}
+                {daypart.completed && daypart.eventCount === 0 && (
+                  <button
+                    className="secondary-button small"
+                    disabled={confirmationBusy !== null}
+                    onClick={() => onReviewDaypart(daypart.daypartId)}
+                  >
+                    <Check aria-hidden="true" /> {confirmationBusy === daypart.daypartId
+                      ? 'Saving…'
+                      : daypart.needsUsageReview ? 'Review empty daypart' : 'Update response'}
+                  </button>
+                )}
+              </article>
+            ))}
+          </div>
+
+          <details className="usage-score-details">
+            <summary>Why this score?</summary>
+            <ul>{score.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
+            <p>Donation reconciliation compares today’s breakfast and the previous day’s lunch–dinner Cool Down activity with today’s donation record. Direct discard is intentionally excluded.</p>
+          </details>
+        </>
+      )}
+    </section>
+  );
+}
+
+function DaypartUsageReview({ daypartLabel, busy, onClose, onSelect }: {
+  daypartLabel: string;
+  busy: boolean;
+  onClose: () => void;
+  onSelect: (outcome: DaypartUsageOutcome) => void;
+}) {
+  return (
+    <Modal title={`Review ${daypartLabel}`} icon={<AlertTriangle />} onClose={onClose}>
+      <p>Nothing was logged for {daypartLabel}. What happened?</p>
+      <div className="usage-review-options">
+        <button className="primary-button" disabled={busy} onClick={() => onSelect('zero-waste')}>
+          <Check aria-hidden="true" /> No Cool Down waste occurred
+        </button>
+        <button className="secondary-button usage-missed-button" disabled={busy} onClick={() => onSelect('missed-waste')}>
+          <AlertTriangle aria-hidden="true" /> Waste occurred but wasn’t logged
+        </button>
+        <button className="secondary-button" disabled={busy} onClick={() => onSelect('uncertain')}>
+          Not sure
+        </button>
+      </div>
+      <p className="usage-review-note">Missed or uncertain waste is recorded as a usage issue. It does not add an estimated quantity to waste totals.</p>
+    </Modal>
   );
 }
 

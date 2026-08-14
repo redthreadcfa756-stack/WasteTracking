@@ -9,6 +9,8 @@ import {
 } from 'firebase/auth';
 import {
   addDoc,
+  arrayUnion,
+  arrayRemove,
   collection,
   deleteDoc,
   doc,
@@ -28,7 +30,7 @@ import {
 } from 'firebase/firestore';
 import { auth, db } from './firebase';
 import { adjustCooldownProductQuantities, buildDailyWasteSummary, isOperatingDayKey } from './domain';
-import type { AppSettings, CooldownPanId, CooldownTimer, DailyWasteSummary, DiscardEvent, DonationRecord, MemberProfile, SosEntry, WasteEvent } from './types';
+import type { AppSettings, CooldownPanId, CooldownTimer, DailyWasteSummary, DaypartId, DaypartUsageOutcome, DiscardEvent, DonationRecord, MemberProfile, SosEntry, UsageDayRecord, WasteEvent } from './types';
 
 function requireFirebase() {
   if (!auth || !db) throw new Error('Firebase environment variables are missing.');
@@ -100,6 +102,72 @@ export async function saveSettings(storeId: string, settings: AppSettings): Prom
     updatedAt: serverTimestamp(),
     updatedBy: services.auth.currentUser?.uid,
   });
+}
+
+export function subscribeUsageDay(
+  storeId: string,
+  selectedDayKey: string,
+  callback: (record: UsageDayRecord | null) => void,
+  onError: (error: FirestoreError) => void,
+): Unsubscribe {
+  const services = requireFirebase();
+  return onSnapshot(doc(services.db, 'stores', storeId, 'usageDays', selectedDayKey), (snapshot) => {
+    callback(snapshot.exists() ? snapshot.data() as UsageDayRecord : null);
+  }, onError);
+}
+
+export async function recordUsageHeartbeat({
+  storeId,
+  selectedDayKey,
+  slotKey,
+  deviceName,
+  recordedBy,
+}: {
+  storeId: string;
+  selectedDayKey: string;
+  slotKey: string;
+  deviceName: string;
+  recordedBy: string;
+}): Promise<void> {
+  const services = requireFirebase();
+  const recordRef = doc(services.db, 'stores', storeId, 'usageDays', selectedDayKey);
+  await setDoc(recordRef, {
+    storeId,
+    dayKey: selectedDayKey,
+    activeSlotKeys: arrayUnion(slotKey),
+    updatedAt: serverTimestamp(),
+    lastRecordedBy: recordedBy,
+    lastDeviceName: deviceName,
+  }, { merge: true });
+}
+
+export async function recordDaypartUsageOutcome({
+  storeId,
+  selectedDayKey,
+  daypartId,
+  outcome,
+  deviceName,
+  recordedBy,
+}: {
+  storeId: string;
+  selectedDayKey: string;
+  daypartId: DaypartId;
+  outcome: DaypartUsageOutcome;
+  deviceName: string;
+  recordedBy: string;
+}): Promise<void> {
+  const services = requireFirebase();
+  const recordRef = doc(services.db, 'stores', storeId, 'usageDays', selectedDayKey);
+  await setDoc(recordRef, {
+    storeId,
+    dayKey: selectedDayKey,
+    zeroWasteDaypartIds: outcome === 'zero-waste' ? arrayUnion(daypartId) : arrayRemove(daypartId),
+    missedWasteDaypartIds: outcome === 'missed-waste' ? arrayUnion(daypartId) : arrayRemove(daypartId),
+    uncertainWasteDaypartIds: outcome === 'uncertain' ? arrayUnion(daypartId) : arrayRemove(daypartId),
+    updatedAt: serverTimestamp(),
+    lastRecordedBy: recordedBy,
+    lastDeviceName: deviceName,
+  }, { merge: true });
 }
 
 export function subscribeWasteForDay(

@@ -8,9 +8,11 @@ import {
   buildDaypartTopWasteItemsFromDailySummaries,
   buildDonationCsv,
   buildProductCaseProjections,
+  buildUsageScore,
   buildWasteCsv,
   buildWeekdayWasteCosts,
   cooldownProductQuantity,
+  currentUsagePresenceSlot,
   daypartWaste,
   detectDaypart,
   distributeDollarTarget,
@@ -25,11 +27,12 @@ import {
   quantityAdjustmentFromDrag,
   targetCasesForProduct,
   targetDollarForProduct,
+  usagePresenceSlotKey,
   wasteExportPresetRange,
   weightToPounds,
   withDerivedProductPricing,
 } from './domain';
-import type { CooldownTimer, DiscardEvent, DonationItemConfig, DonationRecord, WasteEvent } from './types';
+import type { CooldownTimer, DiscardEvent, DonationItemConfig, DonationRecord, UsageDayRecord, WasteEvent } from './types';
 
 const event = (overrides: Partial<WasteEvent>): WasteEvent => ({
   id: 'event', storeId: 'store', productId: 'filets', productName: 'Filets', equivalentUnits: 1,
@@ -93,6 +96,114 @@ describe('domain rules', () => {
     expect(detectDaypart(DEFAULT_SETTINGS.dayparts, new Date(2026, 6, 23, 14, 0))).toBe('afternoon');
     expect(detectDaypart(DEFAULT_SETTINGS.dayparts, new Date(2026, 6, 23, 17, 0))).toBe('early-dinner');
     expect(detectDaypart(DEFAULT_SETTINGS.dayparts, new Date(2026, 6, 23, 19, 0))).toBe('late-dinner');
+  });
+
+  it('identifies the current 15-minute usage presence slot', () => {
+    expect(currentUsagePresenceSlot(DEFAULT_SETTINGS.dayparts, new Date(2026, 7, 4, 10, 37))).toEqual({
+      daypartId: 'lunch',
+      slotKey: 'lunch_0630',
+    });
+    expect(currentUsagePresenceSlot(DEFAULT_SETTINGS.dayparts, new Date(2026, 7, 4, 23, 0))).toBeNull();
+  });
+
+  it('requires donation evidence before a complete tracking day is statistics eligible', () => {
+    const activeSlotKeys = [
+      ...Array.from({ length: 16 }, (_, index) => usagePresenceSlotKey('breakfast', 390 + index * 15)),
+      usagePresenceSlotKey('lunch', 630),
+    ];
+    const usageRecord: UsageDayRecord = {
+      storeId: '00756',
+      dayKey: '2026-08-04',
+      activeSlotKeys,
+      zeroWasteDaypartIds: [],
+      updatedAt: new Date(),
+    };
+    const currentWaste = [7, 8, 9, 10].map((hour, index) => event({
+      id: `breakfast-${index}`,
+      dayKey: '2026-08-04',
+      productId: 'breakfast-filets',
+      productName: 'Breakfast filets',
+      equivalentUnits: 1,
+      daypartId: 'breakfast',
+      eventAt: new Date(2026, 7, 4, hour, 5),
+    }));
+    const result = buildUsageScore({
+      settings: DEFAULT_SETTINGS,
+      selectedDayKey: '2026-08-04',
+      now: new Date(2026, 7, 4, 10, 31),
+      currentWaste,
+      previousWaste: [],
+      donationRecord: null,
+      usageRecord,
+    });
+    expect(result.score).toBe(100);
+    expect(result.status).toBe('provisional');
+    expect(result.reportEligible).toBe(false);
+  });
+
+  it('marks unconfirmed empty dayparts and donation under-reporting as unreliable', () => {
+    const donationRecord: DonationRecord = {
+      storeId: '00756',
+      dayKey: '2026-08-04',
+      actuals: { 'breakfast-filet-donation': 10 },
+      predictions: {},
+      units: { 'breakfast-filet-donation': 'lb' },
+      variance: {},
+      initials: 'CL',
+      submittedAt: new Date(),
+      submittedBy: 'uid',
+      submittedByName: 'Store team',
+      revision: 1,
+    };
+    const result = buildUsageScore({
+      settings: DEFAULT_SETTINGS,
+      selectedDayKey: '2026-08-04',
+      now: new Date(2026, 7, 4, 14, 1),
+      currentWaste: [event({
+        id: 'one-filet',
+        dayKey: '2026-08-04',
+        productId: 'breakfast-filets',
+        productName: 'Breakfast filets',
+        equivalentUnits: 1,
+        daypartId: 'breakfast',
+        eventAt: new Date(2026, 7, 4, 7, 5),
+      })],
+      previousWaste: [],
+      donationRecord,
+      usageRecord: null,
+    });
+    expect(result.donationScore).toBeLessThan(10);
+    expect(result.dayparts.find((daypart) => daypart.daypartId === 'lunch')?.needsUsageReview).toBe(true);
+    expect(result.reportEligible).toBe(false);
+    expect(result.status).toBe('unreliable');
+  });
+
+  it('records known missed and uncertain empty dayparts as explicit usage failures', () => {
+    const baseUsageRecord: UsageDayRecord = {
+      storeId: '00756',
+      dayKey: '2026-08-04',
+      activeSlotKeys: [],
+      zeroWasteDaypartIds: [],
+      missedWasteDaypartIds: ['lunch'],
+      uncertainWasteDaypartIds: ['breakfast'],
+      updatedAt: new Date(),
+    };
+    const result = buildUsageScore({
+      settings: DEFAULT_SETTINGS,
+      selectedDayKey: '2026-08-04',
+      now: new Date(2026, 7, 4, 14, 1),
+      currentWaste: [],
+      previousWaste: [],
+      donationRecord: null,
+      usageRecord: baseUsageRecord,
+    });
+    const breakfast = result.dayparts.find((daypart) => daypart.daypartId === 'breakfast');
+    const lunch = result.dayparts.find((daypart) => daypart.daypartId === 'lunch');
+    expect(breakfast).toMatchObject({ uncertainWaste: true, needsUsageReview: false, continuityScore: 0 });
+    expect(lunch).toMatchObject({ missedWaste: true, needsUsageReview: false, continuityScore: 0 });
+    expect(result.reasons).toContain('Breakfast: Team could not confirm whether the empty daypart was accurate');
+    expect(result.reasons).toContain('Lunch: Team reported that waste occurred but was not logged');
+    expect(result.reportEligible).toBe(false);
   });
 
   it('merges repeated taps by product and minute', () => {
