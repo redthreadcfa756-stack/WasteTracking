@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import {
   useEffect,
+  useCallback,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -101,6 +102,57 @@ type ExportPeriod = 1 | 30 | 60 | 90 | WasteExportPreset | 'custom';
 const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || '00756';
 const WRITE_TIMEOUT_MS = 8_000;
 const DISCARD_IDLE_TIMEOUT_MS = 45_000;
+const MENU_OVERRIDE_IDLE_TIMEOUT_MS = 2 * 60_000;
+const ADMIN_IDLE_TIMEOUT_MS = 2 * 60_000;
+const IDLE_WARNING_GRACE_MS = 15_000;
+
+function useIdleAction(enabled: boolean, timeoutMs: number, onTimeout: () => void) {
+  const action = useRef(onTimeout);
+
+  useEffect(() => {
+    action.current = onTimeout;
+  }, [onTimeout]);
+
+  useEffect(() => {
+    if (!enabled) return;
+    let lastActivityAt = Date.now();
+    let timeoutId = 0;
+
+    const checkIdle = () => {
+      const remaining = timeoutMs - (Date.now() - lastActivityAt);
+      if (remaining <= 0) {
+        action.current();
+        return;
+      }
+      timeoutId = window.setTimeout(checkIdle, remaining);
+    };
+    const markActivity = () => {
+      lastActivityAt = Date.now();
+      window.clearTimeout(timeoutId);
+      timeoutId = window.setTimeout(checkIdle, timeoutMs);
+    };
+    const checkWhenVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      window.clearTimeout(timeoutId);
+      checkIdle();
+    };
+
+    markActivity();
+    window.addEventListener('pointerdown', markActivity, true);
+    window.addEventListener('keydown', markActivity, true);
+    window.addEventListener('input', markActivity, true);
+    window.addEventListener('change', markActivity, true);
+    document.addEventListener('visibilitychange', checkWhenVisible);
+    return () => {
+      window.clearTimeout(timeoutId);
+      window.removeEventListener('pointerdown', markActivity, true);
+      window.removeEventListener('keydown', markActivity, true);
+      window.removeEventListener('input', markActivity, true);
+      window.removeEventListener('change', markActivity, true);
+      document.removeEventListener('visibilitychange', checkWhenVisible);
+    };
+  }, [enabled, timeoutMs]);
+}
 function confirmWrite<T>(write: Promise<T>): Promise<T> {
   return Promise.race([
     write,
@@ -472,6 +524,9 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
   const [warning, setWarning] = useState<{ daypart: string; total: number; target: number } | null>(null);
   const [warningMutedUntil, setWarningMutedUntil] = useState(0);
   const [toast, setToast] = useState('');
+  const toastTimeout = useRef(0);
+  const [adminDirty, setAdminDirty] = useState(false);
+  const [adminIdleWarning, setAdminIdleWarning] = useState(false);
   const [timerNow, setTimerNow] = useState(Date.now());
   const [timerActionBusy, setTimerActionBusy] = useState(false);
   const [alarmPlaybackBlocked, setAlarmPlaybackBlocked] = useState(false);
@@ -480,6 +535,24 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
     (tab.id !== 'sos' || settings.sosEnabled)
     && (tab.id !== 'discard' || settings.discardTrackingEnabled)
   ));
+
+  const notify = useCallback((message: string) => {
+    window.clearTimeout(toastTimeout.current);
+    setToast(message);
+    toastTimeout.current = window.setTimeout(() => {
+      setToast((current) => current === message ? '' : current);
+    }, 2_600);
+  }, []);
+
+  useEffect(() => () => window.clearTimeout(toastTimeout.current), []);
+
+  const returnToCooldown = useCallback((message: string) => {
+    setAdminIdleWarning(false);
+    setAdminDirty(false);
+    setMenuSelection('auto');
+    setActiveTab('waste');
+    notify(message);
+  }, [notify]);
 
   useEffect(() => {
     const syncClock = () => setTimerNow(Date.now());
@@ -511,55 +584,37 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
     }
   }, [activeTab, settings.sosEnabled, settings.discardTrackingEnabled]);
 
-  useEffect(() => {
-    if (activeTab !== 'discard') return;
-    let lastActivityAt = Date.now();
-    let timeoutId = 0;
-    let returned = false;
-    const returnToCooldown = () => {
-      if (returned) return;
-      returned = true;
-      const message = 'Returned to Cool Down after 45 seconds of inactivity.';
-      setActiveTab('waste');
-      setToast(message);
-      window.setTimeout(() => {
-        setToast((current) => current === message ? '' : current);
-      }, 2_600);
-    };
-    const checkIdle = () => {
-      const remaining = DISCARD_IDLE_TIMEOUT_MS - (Date.now() - lastActivityAt);
-      if (remaining <= 0) {
-        returnToCooldown();
-        return;
-      }
-      timeoutId = window.setTimeout(checkIdle, remaining);
-    };
-    const markActivity = () => {
-      lastActivityAt = Date.now();
-      window.clearTimeout(timeoutId);
-      timeoutId = window.setTimeout(checkIdle, DISCARD_IDLE_TIMEOUT_MS);
-    };
-    const checkWhenVisible = () => {
-      if (document.visibilityState !== 'visible') return;
-      window.clearTimeout(timeoutId);
-      checkIdle();
-    };
+  useIdleAction(activeTab === 'discard', DISCARD_IDLE_TIMEOUT_MS, () => {
+    returnToCooldown('Returned to Cool Down after 45 seconds of inactivity.');
+  });
 
-    markActivity();
-    window.addEventListener('pointerdown', markActivity, true);
-    window.addEventListener('keydown', markActivity, true);
-    window.addEventListener('input', markActivity, true);
-    window.addEventListener('change', markActivity, true);
-    document.addEventListener('visibilitychange', checkWhenVisible);
-    return () => {
-      window.clearTimeout(timeoutId);
-      window.removeEventListener('pointerdown', markActivity, true);
-      window.removeEventListener('keydown', markActivity, true);
-      window.removeEventListener('input', markActivity, true);
-      window.removeEventListener('change', markActivity, true);
-      document.removeEventListener('visibilitychange', checkWhenVisible);
-    };
-  }, [activeTab]);
+  useIdleAction(
+    menuSelection !== 'auto' && (activeTab === 'waste' || activeTab === 'discard'),
+    MENU_OVERRIDE_IDLE_TIMEOUT_MS,
+    () => {
+      setMenuSelection('auto');
+      notify('Menu returned to automatic after 2 minutes of inactivity.');
+    },
+  );
+
+  useEffect(() => {
+    if (activeTab !== 'waste' && activeTab !== 'discard' && menuSelection !== 'auto') {
+      setMenuSelection('auto');
+    }
+  }, [activeTab, menuSelection]);
+
+  useIdleAction(activeTab === 'admin' && !adminIdleWarning, ADMIN_IDLE_TIMEOUT_MS, () => {
+    if (adminDirty) setAdminIdleWarning(true);
+    else returnToCooldown('Admin locked after 2 minutes of inactivity.');
+  });
+
+  useEffect(() => {
+    if (!adminIdleWarning) return;
+    const timeoutId = window.setTimeout(() => {
+      returnToCooldown('Unsaved Admin changes were discarded and Admin was locked.');
+    }, IDLE_WARNING_GRACE_MS);
+    return () => window.clearTimeout(timeoutId);
+  }, [adminIdleWarning, returnToCooldown]);
 
   useEffect(() => {
     if (activeTab === 'donations' || activeTab === 'admin' || adminPrompt) return;
@@ -647,11 +702,6 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
     };
   }, [expiredTimerKey]);
 
-  const notify = (message: string) => {
-    setToast(message);
-    window.setTimeout(() => setToast(''), 2600);
-  };
-
   const completeCooldownTimer = async (timer: CooldownTimer) => {
     alarmActionInProgress.current = true;
     stopCooldownAlarm();
@@ -725,6 +775,9 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
   const targetDaypartId: DaypartId = effectiveMenu === 'breakfast'
     ? 'breakfast'
     : nativeDaypartId === 'breakfast' ? 'lunch' : nativeDaypartId;
+  const syncLabel = storeData.operationalWritePending
+    ? online ? 'Saving…' : 'Waiting to sync'
+    : online ? 'Synced' : 'Offline';
 
   if (!storeData.ready) return <FullScreenMessage>Loading live store data…</FullScreenMessage>;
 
@@ -736,9 +789,9 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
           <h1>Cool Down + SOS</h1>
         </div>
         <div className="header-actions">
-          <span className={`sync-pill ${online ? '' : 'offline'}`}>
-            {online ? <Cloud aria-hidden="true" /> : <CloudOff aria-hidden="true" />}
-            {online ? 'Live sync' : 'Offline'}
+          <span className={`sync-pill ${online ? storeData.operationalWritePending ? 'pending' : '' : 'offline'}`}>
+            {!online ? <CloudOff aria-hidden="true" /> : storeData.operationalWritePending ? <Clock3 aria-hidden="true" /> : <Cloud aria-hidden="true" />}
+            {syncLabel}
           </span>
         </div>
       </header>
@@ -851,6 +904,7 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
             testDaypartEnabled={testDaypartEnabled}
             setTestDaypartEnabled={setTestDaypartEnabled}
             notify={notify}
+            onDirtyChange={setAdminDirty}
           />
         )}
       </main>
@@ -869,6 +923,7 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
           onUnlocked={() => {
             stopCooldownAlarm();
             setAdminPrompt(false);
+            setAdminDirty(false);
             setActiveTab('admin');
           }}
         />
@@ -930,6 +985,15 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
             >
               <Check /> {timerActionBusy ? 'Saving…' : 'Pan wrapped and moved'}
             </button>
+          </div>
+        </Modal>
+      )}
+      {adminIdleWarning && (
+        <Modal title="Admin inactive" icon={<AlertTriangle />} onClose={() => setAdminIdleWarning(false)}>
+          <p>Admin has unsaved changes. This device will discard them, lock Admin, and return to Cool Down in 15 seconds.</p>
+          <div className="idle-warning-actions">
+            <button className="secondary-button" onClick={() => setAdminIdleWarning(false)}>Stay in Admin</button>
+            <button className="primary-button" onClick={() => returnToCooldown('Unsaved Admin changes were discarded and Admin was locked.')}>Discard changes and return</button>
           </div>
         </Modal>
       )}
@@ -1189,31 +1253,20 @@ function WasteTab({
           </button>
         </div>
       )}
-      <div className="section-heading">
-        <div>
-          <p className="eyebrow">
-            {testMode ? 'Test Daypart · Local session' : `${daypart.label} · ${formatMinutes(daypart.startMinutes)}–${formatMinutes(daypart.endMinutes)}`}
-          </p>
-          <h2>{testMode ? 'Practice cool down entry' : 'Log product entering cool down'}</h2>
-        </div>
-        <label className="compact-control">
-          Menu
-          <select value={menuSelection} onChange={(event) => setMenuSelection(event.target.value as MenuSelection)}>
-            <option value="auto">Auto · {effectiveMenu === 'breakfast' ? 'Breakfast' : 'Lunch'}</option>
-            <option value="breakfast">Breakfast override</option>
-            <option value="lunch">Lunch override</option>
-          </select>
-        </label>
-      </div>
+      <OperationalHeading
+        eyebrow={testMode ? 'Test Daypart · Local session' : `${daypart.label} · ${formatMinutes(daypart.startMinutes)}–${formatMinutes(daypart.endMinutes)}`}
+        title={testMode ? 'Practice cool down entry' : 'Log product entering cool down'}
+        effectiveMenu={effectiveMenu}
+        menuSelection={menuSelection}
+        setMenuSelection={setMenuSelection}
+      />
 
-      <div className="stat-grid one">
-        <Stat
-          label={`${testMode ? 'Test · ' : ''}${daypart.label} waste / target`}
-          value={`${formatMoney(activeWaste.cost)} / ${formatMoney(daypart.totalDollarTarget)}`}
-          detail={`${varianceDetail}${testMode ? ' · Local only' : ' · Cool Down + discard'}`}
-          tone={targetVariance > 0 ? 'danger' : undefined}
-        />
-      </div>
+      <DaypartWasteTarget
+        label={`${testMode ? 'Test · ' : ''}${daypart.label} waste / target`}
+        cost={activeWaste.cost}
+        target={daypart.totalDollarTarget}
+        detail={`${varianceDetail}${testMode ? ' · Local only' : ' · Cool Down + discard'}`}
+      />
 
       <div className="waste-grid">
         {products.map((product) => {
@@ -1239,12 +1292,12 @@ function WasteTab({
                 : activeTimer || pendingPanQuantity > 0 ? `${pan.label} · Current pan` : `${pan.label} · Ready`;
           return (
             <div className="waste-card-wrap" key={product.id}>
-              <WasteCard
+              <ProductTrackingCard
                 product={product}
-                currentPanUnits={currentPanUnits}
-                currentPanLabel={currentPanLabel}
-                daypartUnits={combinedTotals.units}
-                daypartCost={combinedTotals.cost}
+                primaryLabel={currentPanLabel}
+                primaryValue={currentPanUnits === null ? 'No active pan' : displayProductQuantity(product, currentPanUnits)}
+                primaryEmpty={currentPanUnits === null}
+                secondaryText={`Daypart waste: ${displayProductQuantity(product, combinedTotals.units)} · ${formatMoney(combinedTotals.cost)}`}
                 onAdd={() => adjustWaste(product, product.tapQuantity)}
                 onSubtract={() => subtractWaste(product, coolDownTotals.units)}
                 onAdjustQuantity={settings.cardScrubEnabled
@@ -1270,31 +1323,15 @@ function WasteTab({
         })}
       </div>
 
-      <div className="section-heading activity-heading">
-        <div>
-          <p className="eyebrow">{testMode ? 'Temporary entries · Not saved' : 'Merged by product and minute'}</p>
-          <h2>{testMode ? 'Test activity' : 'Recent activity'}</h2>
-        </div>
-        <button className="secondary-button small" onClick={undoLast} disabled={!displayedEvents.some((event) => event.createdBy === member.uid)}>
-          <RotateCcw aria-hidden="true" /> Undo last
-        </button>
-      </div>
-      <div className="activity-list">
-        {merged.length === 0 && <EmptyState>{testMode ? 'No test cool down entered for this menu.' : 'No cool down logged for this menu yet.'}</EmptyState>}
-        {merged.slice(0, 12).map((entry) => {
-          const product = settings.products.find((candidate) => candidate.id === entry.productId)!;
-          return (
-            <div className="activity-row" key={entry.key}>
-              <span className={`activity-dot tone-${product.tone}`} />
-              <div>
-                <strong>{displayProductQuantity(product, entry.equivalentUnits)} {product.name}</strong>
-                <span>{entry.occurredAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} · {entry.deviceNames.join(', ')}</span>
-              </div>
-              <strong>{formatMoney(entry.cost)}</strong>
-            </div>
-          );
-        })}
-      </div>
+      <RecentProductActivity
+        eyebrow={testMode ? 'Temporary entries · Not saved' : 'Merged by product and minute'}
+        title={testMode ? 'Test activity' : 'Recent activity'}
+        emptyText={testMode ? 'No test cool down entered for this menu.' : 'No cool down logged for this menu yet.'}
+        entries={merged}
+        products={settings.products}
+        onUndo={undoLast}
+        undoDisabled={!displayedEvents.some((event) => event.createdBy === member.uid)}
+      />
 
       {!testMode && (
         <section className="mtd-waste-summary" aria-labelledby="mtd-waste-title">
@@ -1325,17 +1362,12 @@ function WasteTab({
       )}
 
       {nuggetPicker && (
-        <Modal title="Add individual nuggets" onClose={() => setNuggetPicker(null)}>
-          <p>Choose how many individual nuggets to add. Fourteen nuggets equals one cup.</p>
-          <div className="number-grid">
-            {Array.from({ length: 13 }, (_, index) => index + 1).map((count) => (
-              <button key={count} onClick={() => {
-                void adjustWaste(nuggetPicker, count);
-                setNuggetPicker(null);
-              }}>{count}</button>
-            ))}
-          </div>
-        </Modal>
+        <IndividualNuggetPicker
+          product={nuggetPicker}
+          mode="cooldown"
+          onClose={() => setNuggetPicker(null)}
+          onSelect={(count) => void adjustWaste(nuggetPicker, count)}
+        />
       )}
     </section>
   );
@@ -1514,21 +1546,23 @@ function QuantityScrubOverlay({
   );
 }
 
-function WasteCard({
+function ProductTrackingCard({
   product,
-  currentPanUnits,
-  currentPanLabel,
-  daypartUnits,
-  daypartCost,
+  variant = 'cooldown',
+  primaryLabel,
+  primaryValue,
+  primaryEmpty = false,
+  secondaryText,
   onAdd,
   onSubtract,
   onAdjustQuantity,
 }: {
   product: ProductConfig;
-  currentPanUnits: number | null;
-  currentPanLabel: string;
-  daypartUnits: number;
-  daypartCost: number;
+  variant?: 'cooldown' | 'discard';
+  primaryLabel: string;
+  primaryValue: string;
+  primaryEmpty?: boolean;
+  secondaryText?: string;
   onAdd: () => void;
   onSubtract: () => void;
   onAdjustQuantity?: (adjustment: number) => void;
@@ -1537,7 +1571,7 @@ function WasteCard({
 
   return (
     <button
-      className={`waste-card tone-${product.tone}${press.holding ? ' is-holding' : ''}${onAdjustQuantity ? ' quantity-scrub-card' : ''}${press.scrubAdjustment !== null ? ' is-scrubbing' : ''}`}
+      className={`waste-card${variant === 'discard' ? ' discard-card' : ''} tone-${product.tone}${press.holding ? ' is-holding' : ''}${onAdjustQuantity ? ' quantity-scrub-card' : ''}${press.scrubAdjustment !== null ? ' is-scrubbing' : ''}`}
       onPointerDown={press.startPress}
       onPointerMove={press.movePress}
       onPointerUp={press.endPress}
@@ -1554,17 +1588,115 @@ function WasteCard({
         <span className="waste-circle">{press.holding && !onAdjustQuantity ? '−' : '+'}</span>
         <span>{product.name} - {productTrackingPriceLabel(product)}</span>
       </span>
-      <span className="waste-pan-label">{currentPanLabel}</span>
-      <span className={`waste-total${currentPanUnits === null ? ' empty' : ''}`}>
-        {currentPanUnits === null ? 'No active pan' : displayProductQuantity(product, currentPanUnits)}
-      </span>
-      <span className="waste-daypart-total">
-        Daypart waste: {displayProductQuantity(product, daypartUnits)} · {formatMoney(daypartCost)}
-      </span>
+      <span className="waste-pan-label">{primaryLabel}</span>
+      <span className={`waste-total${primaryEmpty ? ' empty' : ''}`}>{primaryValue}</span>
+      {secondaryText && <span className="waste-daypart-total">{secondaryText}</span>}
       <span className="waste-hint">
         {onAdjustQuantity ? 'Tap +1 · Hold, slide left − / right +' : 'Tap to add · Hold to subtract'}
       </span>
     </button>
+  );
+}
+
+function OperationalHeading({ eyebrow, title, effectiveMenu, menuSelection, setMenuSelection }: {
+  eyebrow: string;
+  title: string;
+  effectiveMenu: MenuId;
+  menuSelection: MenuSelection;
+  setMenuSelection: (selection: MenuSelection) => void;
+}) {
+  return (
+    <div className="section-heading">
+      <div><p className="eyebrow">{eyebrow}</p><h2>{title}</h2></div>
+      <label className="compact-control">
+        Menu · overrides reset after 2 min idle
+        <select value={menuSelection} onChange={(event) => setMenuSelection(event.target.value as MenuSelection)}>
+          <option value="auto">Auto · {effectiveMenu === 'breakfast' ? 'Breakfast' : 'Lunch'}</option>
+          <option value="breakfast">Breakfast override</option>
+          <option value="lunch">Lunch override</option>
+        </select>
+      </label>
+    </div>
+  );
+}
+
+function DaypartWasteTarget({ label, cost, target, detail }: {
+  label: string;
+  cost: number;
+  target: number;
+  detail: string;
+}) {
+  return (
+    <div className="stat-grid one">
+      <Stat
+        label={label}
+        value={`${formatMoney(cost)} / ${formatMoney(target)}`}
+        detail={detail}
+        tone={cost - target > 0 ? 'danger' : undefined}
+      />
+    </div>
+  );
+}
+
+function RecentProductActivity({ eyebrow, title, emptyText, entries, products, onUndo, undoDisabled }: {
+  eyebrow: string;
+  title: string;
+  emptyText: string;
+  entries: ReturnType<typeof mergeActivity>;
+  products: ProductConfig[];
+  onUndo: () => void;
+  undoDisabled: boolean;
+}) {
+  return (
+    <>
+      <div className="section-heading activity-heading">
+        <div><p className="eyebrow">{eyebrow}</p><h2>{title}</h2></div>
+        <button className="secondary-button small" onClick={onUndo} disabled={undoDisabled}>
+          <RotateCcw aria-hidden="true" /> Undo last
+        </button>
+      </div>
+      <div className="activity-list">
+        {entries.length === 0 && <EmptyState>{emptyText}</EmptyState>}
+        {entries.slice(0, 12).map((entry) => {
+          const product = products.find((candidate) => candidate.id === entry.productId);
+          if (!product) return null;
+          return (
+            <div className="activity-row" key={entry.key}>
+              <span className={`activity-dot tone-${product.tone}`} />
+              <div>
+                <strong>{displayProductQuantity(product, entry.equivalentUnits)} {product.name}</strong>
+                <span>{entry.occurredAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} · {entry.deviceNames.join(', ')}</span>
+              </div>
+              <strong>{formatMoney(entry.cost)}</strong>
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
+function IndividualNuggetPicker({ product, mode, onClose, onSelect }: {
+  product: ProductConfig;
+  mode: 'cooldown' | 'discard';
+  onClose: () => void;
+  onSelect: (count: number) => void;
+}) {
+  const discarded = mode === 'discard';
+  return (
+    <Modal title={discarded ? 'Add individual discarded nuggets' : 'Add individual nuggets'} onClose={onClose}>
+      <p>{discarded
+        ? 'Choose how many individual nuggets went directly to trash.'
+        : `Choose how many individual nuggets to add. ${product.unitsPerCup || 14} nuggets equals one cup.`}</p>
+      <div className="number-grid">
+        {Array.from({ length: Math.max(1, (product.unitsPerCup || 14) - 1) }, (_, index) => index + 1).map((count) => (
+          <button key={count} onClick={() => {
+            onSelect(count);
+            onClose();
+          }}>{count}</button>
+        ))}
+      </div>
+    </Modal>
   );
 }
 
@@ -1665,29 +1797,20 @@ function DiscardTab({
 
   return (
     <section className="panel-stack">
-      <div className="section-heading">
-        <div>
-          <p className="eyebrow">{daypart.label} · Direct to trash · Returns to Cool Down after 45 seconds idle</p>
-          <h2>Log product that skips cool down</h2>
-        </div>
-        <label className="compact-control">
-          Menu
-          <select value={menuSelection} onChange={(event) => setMenuSelection(event.target.value as MenuSelection)}>
-            <option value="auto">Auto · {effectiveMenu === 'breakfast' ? 'Breakfast' : 'Lunch'}</option>
-            <option value="breakfast">Breakfast override</option>
-            <option value="lunch">Lunch override</option>
-          </select>
-        </label>
-      </div>
+      <OperationalHeading
+        eyebrow={`${daypart.label} · Direct to trash · Returns to Cool Down after 45 seconds idle`}
+        title="Log product that skips cool down"
+        effectiveMenu={effectiveMenu}
+        menuSelection={menuSelection}
+        setMenuSelection={setMenuSelection}
+      />
 
-      <div className="stat-grid one">
-        <Stat
-          label={`${daypart.label} waste / target`}
-          value={`${formatMoney(activeWaste.cost)} / ${formatMoney(daypart.totalDollarTarget)}`}
-          detail={`${varianceDetail} · Cool Down + discard`}
-          tone={targetVariance > 0 ? 'danger' : undefined}
-        />
-      </div>
+      <DaypartWasteTarget
+        label={`${daypart.label} waste / target`}
+        cost={activeWaste.cost}
+        target={daypart.totalDollarTarget}
+        detail={`${varianceDetail} · Cool Down + discard`}
+      />
 
       <div>
         <p className="discard-step-label">Tap each product sent directly to trash</p>
@@ -1696,9 +1819,11 @@ function DiscardTab({
             const totals = productWaste(activeEvents, product.id);
             return (
               <div className="waste-card-wrap" key={product.id}>
-                <DiscardCard
+                <ProductTrackingCard
                   product={product}
-                  daypartUnits={totals.units}
+                  variant="discard"
+                  primaryLabel="Daypart direct discard"
+                  primaryValue={displayProductQuantity(product, totals.units)}
                   onAdd={() => void adjustDiscard(product, product.tapQuantity)}
                   onSubtract={() => subtractDiscard(product, totals.units)}
                   onAdjustQuantity={settings.cardScrubEnabled
@@ -1725,80 +1850,25 @@ function DiscardTab({
         </div>
       </div>
 
-      <div className="section-heading activity-heading">
-        <div><p className="eyebrow">Merged by product and minute</p><h2>Recent discard activity</h2></div>
-        <button className="secondary-button small" onClick={undoLast} disabled={!events.some((event) => event.createdBy === member.uid)}>
-          <RotateCcw aria-hidden="true" /> Undo last
-        </button>
-      </div>
-      <div className="activity-list">
-        {merged.length === 0 && <EmptyState>No direct discard logged for this menu yet.</EmptyState>}
-        {merged.slice(0, 12).map((entry) => {
-          const product = settings.products.find((candidate) => candidate.id === entry.productId)!;
-          return (
-            <div className="activity-row" key={entry.key}>
-              <span className={`activity-dot tone-${product.tone}`} />
-              <div>
-                <strong>{displayProductQuantity(product, entry.equivalentUnits)} {product.name}</strong>
-                <span>{entry.occurredAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} · {entry.deviceNames.join(', ')}</span>
-              </div>
-              <strong>{formatMoney(entry.cost)}</strong>
-            </div>
-          );
-        })}
-      </div>
+      <RecentProductActivity
+        eyebrow="Merged by product and minute"
+        title="Recent discard activity"
+        emptyText="No direct discard logged for this menu yet."
+        entries={merged}
+        products={settings.products}
+        onUndo={undoLast}
+        undoDisabled={!events.some((event) => event.createdBy === member.uid)}
+      />
 
       {nuggetPicker && (
-        <Modal title="Add individual discarded nuggets" onClose={() => setNuggetPicker(null)}>
-          <p>Choose how many individual nuggets went directly to trash.</p>
-          <div className="number-grid">
-            {Array.from({ length: 13 }, (_, index) => index + 1).map((count) => (
-              <button key={count} onClick={() => {
-                void adjustDiscard(nuggetPicker, count);
-                setNuggetPicker(null);
-              }}>{count}</button>
-            ))}
-          </div>
-        </Modal>
+        <IndividualNuggetPicker
+          product={nuggetPicker}
+          mode="discard"
+          onClose={() => setNuggetPicker(null)}
+          onSelect={(count) => void adjustDiscard(nuggetPicker, count)}
+        />
       )}
     </section>
-  );
-}
-
-function DiscardCard({ product, daypartUnits, onAdd, onSubtract, onAdjustQuantity }: {
-  product: ProductConfig;
-  daypartUnits: number;
-  onAdd: () => void;
-  onSubtract: () => void;
-  onAdjustQuantity?: (adjustment: number) => void;
-}) {
-  const press = useProductCardPress({ onAdd, onSubtract, onAdjustQuantity });
-
-  return (
-    <button
-      className={`waste-card discard-card tone-${product.tone}${press.holding ? ' is-holding' : ''}${onAdjustQuantity ? ' quantity-scrub-card' : ''}${press.scrubAdjustment !== null ? ' is-scrubbing' : ''}`}
-      onPointerDown={press.startPress}
-      onPointerMove={press.movePress}
-      onPointerUp={press.endPress}
-      onPointerCancel={press.cancelPress}
-      onPointerLeave={onAdjustQuantity ? undefined : press.cancelPress}
-      onLostPointerCapture={onAdjustQuantity ? press.lostPointerCapture : undefined}
-      onContextMenu={(event) => event.preventDefault()}
-      onClick={press.clickPress}
-    >
-      {press.scrubAdjustment !== null && (
-        <QuantityScrubOverlay adjustment={press.scrubAdjustment} productName={product.name} />
-      )}
-      <span className="waste-card-top">
-        <span className="waste-circle">{press.holding && !onAdjustQuantity ? '−' : '+'}</span>
-        <span>{product.name} - {productTrackingPriceLabel(product)}</span>
-      </span>
-      <span className="waste-pan-label">Daypart direct discard</span>
-      <span className="waste-total">{displayProductQuantity(product, daypartUnits)}</span>
-      <span className="waste-hint">
-        {onAdjustQuantity ? 'Tap +1 · Hold, slide left − / right +' : 'Tap to add · Hold to subtract'}
-      </span>
-    </button>
   );
 }
 
@@ -1941,7 +2011,6 @@ function DonationsTab({ settings, member, currentDay, notify }: {
       (actuals[item.id] || 0) + (addedAmounts[item.id] || 0),
     ]))
     : actuals;
-
   return (
     <section className="panel-stack">
       <div className="section-heading">
@@ -1962,6 +2031,7 @@ function DonationsTab({ settings, member, currentDay, notify }: {
           {existing && <span className="status-badge"><Check aria-hidden="true" /> Submitted · revision {existing.revision}</span>}
         </div>
       </div>
+      <AlarmMutedNotice page="Donations" />
       <div className="donation-replacement-warning" role="note">
         <AlertTriangle aria-hidden="true" />
         <div>
@@ -2093,7 +2163,9 @@ function DonationsTab({ settings, member, currentDay, notify }: {
                 });
                 setSubmitOpen(false);
                 setEditing(false);
-                notify(existing ? `Updated donation totals saved for ${selectedDayLabel}.` : `Donation totals for ${selectedDayLabel} saved.`);
+                notify(existing
+                  ? `Updated donation totals saved for ${selectedDayLabel}.`
+                  : `Donation totals for ${selectedDayLabel} saved.`);
               }}
             />
           )}
@@ -2141,19 +2213,22 @@ function DonationSubmit({ existing, dayLabel, onClose, onSubmit }: {
   );
 }
 
-function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDaypartEnabled, notify }: {
+function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDaypartEnabled, notify, onDirtyChange }: {
   settings: AppSettings;
   member: MemberProfile;
   deviceName: string;
   testDaypartEnabled: boolean;
   setTestDaypartEnabled: (enabled: boolean) => void;
   notify: (message: string) => void;
+  onDirtyChange: (dirty: boolean) => void;
 }) {
   const storeId = member.storeId;
   const [draft, setDraft] = useState<AppSettings>(() => structuredClone(settings));
   const [selectedDaypart, setSelectedDaypart] = useState<DaypartId>('breakfast');
   const [saving, setSaving] = useState(false);
   const [device, setDevice] = useState(deviceName);
+  const [savedSettingsSignature, setSavedSettingsSignature] = useState(() => JSON.stringify(settings));
+  const [savedDevice, setSavedDevice] = useState(deviceName);
   const [exportStartDate, setExportStartDate] = useState(dayKey());
   const [exportEndDate, setExportEndDate] = useState(dayKey());
   const [exportPeriod, setExportPeriod] = useState<ExportPeriod>(1);
@@ -2164,7 +2239,18 @@ function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDay
   const [exportSource, setExportSource] = useState<'live' | 'demo'>('live');
   const [changingDemoData, setChangingDemoData] = useState(false);
 
-  useEffect(() => setDraft(structuredClone(settings)), [settings]);
+  useEffect(() => {
+    setDraft(structuredClone(settings));
+    setSavedSettingsSignature(JSON.stringify(settings));
+  }, [settings]);
+
+  const hasUnsavedChanges = JSON.stringify(draft) !== savedSettingsSignature || device !== savedDevice;
+
+  useEffect(() => {
+    onDirtyChange(hasUnsavedChanges);
+  }, [hasUnsavedChanges, onDirtyChange]);
+
+  useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
 
   const daypartIndex = draft.dayparts.findIndex((part) => part.id === selectedDaypart);
   const daypart = draft.dayparts[daypartIndex];
@@ -2225,6 +2311,10 @@ function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDay
       await saveSettings(storeId, settingsToSave);
       if (!settingsToSave.cooldownTimersEnabled) await resetAllCooldownTimers(storeId);
       localStorage.setItem('waste-sos-device-name', device.trim() || 'Web device');
+      setDraft(settingsToSave);
+      setSavedSettingsSignature(JSON.stringify(settingsToSave));
+      setSavedDevice(device);
+      onDirtyChange(false);
       notify('Admin settings saved for every device.');
     } catch (caught) {
       notify(errorMessage(caught));
@@ -2391,6 +2481,7 @@ function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDay
         <div><p className="eyebrow">Protected settings</p><h2>Targets, costs, and weights</h2></div>
         <button className="primary-button" onClick={save} disabled={saving}><Save /> {saving ? 'Saving…' : 'Save all changes'}</button>
       </div>
+      <AlarmMutedNotice page="Admin" timeout="2 minutes" />
       <div className="admin-strip">
         <label>This device name<input value={device} onChange={(event) => setDevice(event.target.value)} /></label>
         <label className="toggle-row">
@@ -2768,6 +2859,20 @@ function Modal({ title, icon, onClose, children }: { title: string; icon?: React
 
 function Stat({ label, value, detail, tone }: { label: string; value: string; detail: string; tone?: 'danger' }) {
   return <div className={`stat ${tone === 'danger' ? 'danger' : ''}`}><span>{label}</span><strong>{value}</strong><small>{detail}</small></div>;
+}
+
+function AlarmMutedNotice({ page, timeout }: { page: string; timeout?: string }) {
+  return (
+    <div className="alarm-muted-notice" role="note">
+      <AlertTriangle aria-hidden="true" />
+      <div>
+        <strong>Cooldown alarms are muted on this device while {page} is open.</strong>
+        <span>Other devices on Cool Down keep alarming normally. {timeout
+          ? `This device returns to Cool Down after ${timeout} of inactivity.`
+          : 'This page stays open until you choose another tab.'}</span>
+      </div>
+    </div>
+  );
 }
 
 function EmptyState({ children }: { children: ReactNode }) {

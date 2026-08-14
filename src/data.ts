@@ -105,7 +105,7 @@ export async function saveSettings(storeId: string, settings: AppSettings): Prom
 export function subscribeWasteForDay(
   storeId: string,
   selectedDayKey: string,
-  callback: (events: WasteEvent[]) => void,
+  callback: (events: WasteEvent[], hasPendingWrites: boolean) => void,
   onError: (error: FirestoreError) => void,
 ): Unsubscribe {
   const services = requireFirebase();
@@ -115,7 +115,10 @@ export function subscribeWasteForDay(
     orderBy('eventAt', 'desc'),
   );
   return onSnapshot(eventsQuery, { includeMetadataChanges: true }, (snapshot) => {
-    callback(snapshot.docs.map((eventDoc) => ({ id: eventDoc.id, ...eventDoc.data() } as WasteEvent)));
+    callback(
+      snapshot.docs.map((eventDoc) => ({ id: eventDoc.id, ...eventDoc.data() } as WasteEvent)),
+      snapshot.metadata.hasPendingWrites,
+    );
   }, onError);
 }
 
@@ -350,7 +353,7 @@ export async function removeWasteEvents(storeId: string, eventIds: string[]): Pr
 export function subscribeDiscardForDay(
   storeId: string,
   selectedDayKey: string,
-  callback: (events: DiscardEvent[]) => void,
+  callback: (events: DiscardEvent[], hasPendingWrites: boolean) => void,
   onError: (error: FirestoreError) => void,
 ): Unsubscribe {
   const services = requireFirebase();
@@ -360,7 +363,10 @@ export function subscribeDiscardForDay(
     orderBy('eventAt', 'desc'),
   );
   return onSnapshot(eventsQuery, { includeMetadataChanges: true }, (snapshot) => {
-    callback(snapshot.docs.map((eventDoc) => ({ id: eventDoc.id, ...eventDoc.data() } as DiscardEvent)));
+    callback(
+      snapshot.docs.map((eventDoc) => ({ id: eventDoc.id, ...eventDoc.data() } as DiscardEvent)),
+      snapshot.metadata.hasPendingWrites,
+    );
   }, onError);
 }
 

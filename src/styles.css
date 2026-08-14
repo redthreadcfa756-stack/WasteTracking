@@ -148,6 +148,7 @@ code { font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.9em; }
 }
 .sync-pill svg, .status-badge svg { width: 15px; height: 15px; }
 .sync-pill.offline { color: #7a5e16; background: #f7efd6; }
+.sync-pill.pending { color: #7a4b00; background: #fff4e5; }
 
 .icon-button {
   width: 44px;
@@ -524,6 +525,20 @@ code { font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.9em; }
 .donation-replacement-warning svg { width: 20px; flex: 0 0 auto; }
 .donation-replacement-warning > div { display: grid; gap: 0.2rem; }
 .donation-replacement-warning span { font-size: 0.84rem; line-height: 1.4; }
+.alarm-muted-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid #cadbe4;
+  border-left: 7px solid #507a90;
+  color: #274b5d;
+  background: #eef7fb;
+}
+.alarm-muted-notice svg { width: 20px; flex: 0 0 auto; }
+.alarm-muted-notice > div { display: grid; gap: 0.2rem; }
+.alarm-muted-notice span { font-size: 0.84rem; line-height: 1.4; }
+.idle-warning-actions { display: grid; gap: 0.65rem; }
 .submit-day { justify-self: end; }
 .danger-text, .error-text { color: var(--danger) !important; }
 .form-error { margin: 0; color: var(--danger) !important; font-size: 0.83rem; }
@@ -794,6 +809,11 @@ label,
 }
 
 .sync-pill.offline {
+  color: #7a4b00;
+  background: #fff4e5;
+}
+
+.sync-pill.pending {
   color: #7a4b00;
   background: #fff4e5;
 }

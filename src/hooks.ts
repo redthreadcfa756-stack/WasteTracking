@@ -150,8 +150,10 @@ export function useStoreData(storeId: string | undefined, now: Date) {
   const monthCompletedThrough = completedDayCandidate >= monthStart ? completedDayCandidate : '';
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [todayWaste, setTodayWaste] = useState<WasteEvent[]>([]);
+  const [todayWastePending, setTodayWastePending] = useState(false);
   const [monthToDateSummaries, setMonthToDateSummaries] = useState<DailyWasteSummary[]>([]);
   const [discardEvents, setDiscardEvents] = useState<DiscardEvent[]>([]);
+  const [discardPending, setDiscardPending] = useState(false);
   const [sosEntries, setSosEntries] = useState<SosEntry[]>([]);
   const [cooldownTimers, setCooldownTimers] = useState<CooldownTimer[]>([]);
   const [cooldownTimersSynced, setCooldownTimersSynced] = useState(false);
@@ -162,6 +164,7 @@ export function useStoreData(storeId: string | undefined, now: Date) {
     if (!storeId) return;
     setError('');
     setReady(true);
+    setTodayWastePending(false);
     setCooldownTimersSynced(false);
     const handleError = (caught: { message: string }) => {
       setError(caught.message);
@@ -199,7 +202,10 @@ export function useStoreData(storeId: string | undefined, now: Date) {
           )),
         } : value);
       }, handleError),
-      subscribeWasteForDay(storeId, today, setTodayWaste, handleError),
+      subscribeWasteForDay(storeId, today, (events, hasPendingWrites) => {
+        setTodayWaste(events);
+        setTodayWastePending(hasPendingWrites);
+      }, handleError),
       subscribeSosForDay(storeId, today, setSosEntries, handleError),
       subscribeCooldownTimers(storeId, (timers, serverConfirmed) => {
         setCooldownTimers(timers);
@@ -229,9 +235,14 @@ export function useStoreData(storeId: string | undefined, now: Date) {
   useEffect(() => {
     if (!storeId) {
       setDiscardEvents([]);
+      setDiscardPending(false);
       return;
     }
-    return subscribeDiscardForDay(storeId, today, setDiscardEvents, (caught) => {
+    setDiscardPending(false);
+    return subscribeDiscardForDay(storeId, today, (events, hasPendingWrites) => {
+      setDiscardEvents(events);
+      setDiscardPending(hasPendingWrites);
+    }, (caught) => {
       setError(caught.message);
       setReady(true);
     });
@@ -244,6 +255,7 @@ export function useStoreData(storeId: string | undefined, now: Date) {
     monthStart,
     monthCompletedThrough,
     discardEvents,
+    operationalWritePending: todayWastePending || discardPending,
     sosEntries,
     cooldownTimers,
     cooldownTimersSynced,
