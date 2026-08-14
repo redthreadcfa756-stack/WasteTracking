@@ -1,8 +1,25 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
+const buildId = new Date().toISOString();
+
 export default defineConfig({
-  plugins: [react()],
+  define: {
+    'import.meta.env.VITE_APP_BUILD_ID': JSON.stringify(buildId),
+  },
+  plugins: [
+    react(),
+    {
+      name: 'build-version',
+      generateBundle() {
+        this.emitFile({
+          type: 'asset',
+          fileName: 'version.json',
+          source: `${JSON.stringify({ buildId })}\n`,
+        });
+      },
+    },
+  ],
   build: {
     target: 'es2022',
     sourcemap: true,

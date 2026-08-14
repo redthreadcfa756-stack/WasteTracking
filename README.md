@@ -2,6 +2,8 @@
 
 An iOS-first installable web app with live multi-device cool down tracking, looping pan-expiration alarms with shared one-minute snooze, optional direct-discard tracking, combined daypart waste targets, daypart SOS entries, Shared Table reconciliation, and protected admin settings.
 
+Production builds emit a unique `version.json`. Open pages check it every minute and whenever they regain focus or connectivity; after detecting a deployment, they wait for five seconds without user input and reload into the new build automatically. This version check uses only a tiny static file and does not consume Firestore reads.
+
 ## Architecture
 
 - **GitHub** stores the source and runs tests on every production push.
