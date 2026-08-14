@@ -491,6 +491,24 @@ export function subscribeDonationRecord(
   }, onError);
 }
 
+export function subscribeDonationRecordsForDateRange(
+  storeId: string,
+  startDayKey: string,
+  endDayKey: string,
+  callback: (records: DonationRecord[]) => void,
+  onError: (error: FirestoreError) => void,
+): Unsubscribe {
+  const services = requireFirebase();
+  const recordsQuery = query(
+    collection(services.db, 'stores', storeId, 'donationRecords'),
+    where('dayKey', '>=', startDayKey),
+    where('dayKey', '<=', endDayKey),
+  );
+  return onSnapshot(recordsQuery, { includeMetadataChanges: true }, (snapshot) => {
+    callback(snapshot.docs.map((recordDoc) => recordDoc.data() as DonationRecord));
+  }, onError);
+}
+
 export async function loadDonationRecordsForDateRange(
   storeId: string,
   startDayKey: string,

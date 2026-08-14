@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { User } from 'firebase/auth';
-import { ensureDailyWasteSummaries, observeAuth, subscribeCooldownTimers, subscribeDailyWasteSummaries, subscribeDiscardForDay, subscribeDonationRecord, subscribeSettings, subscribeSosForDay, subscribeUsageDay, subscribeWasteForDay } from './data';
+import { ensureDailyWasteSummaries, observeAuth, subscribeCooldownTimers, subscribeDailyWasteSummaries, subscribeDiscardForDay, subscribeDonationRecord, subscribeDonationRecordsForDateRange, subscribeSettings, subscribeSosForDay, subscribeUsageDay, subscribeWasteForDay } from './data';
 import { DEFAULT_DONATION_ITEMS, DEFAULT_PRODUCTS, PRODUCT_TONES } from './defaults';
 import { dayKey, donationWindowDayKeys, withDerivedProductPricing } from './domain';
 import type { AppSettings, CooldownTimer, DailyWasteSummary, DiscardEvent, DonationRecord, MemberProfile, SosEntry, UsageDayRecord, WasteEvent } from './types';
@@ -202,6 +202,27 @@ export function useUsageData(storeId: string, selectedDayKey: string) {
   };
 }
 
+export function useUsageDayRecord(storeId: string, selectedDayKey: string) {
+  const [record, setRecord] = useState<UsageDayRecord | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    setRecord(null);
+    setLoading(true);
+    setError('');
+    return subscribeUsageDay(storeId, selectedDayKey, (nextRecord) => {
+      setRecord(nextRecord);
+      setLoading(false);
+    }, (caught) => {
+      setError(caught.message);
+      setLoading(false);
+    });
+  }, [selectedDayKey, storeId]);
+
+  return { record, loading, error };
+}
+
 export function useStoreData(storeId: string | undefined, now: Date) {
   const today = dayKey(now);
   const monthStart = dayKey(new Date(now.getFullYear(), now.getMonth(), 1, 12));
@@ -214,6 +235,7 @@ export function useStoreData(storeId: string | undefined, now: Date) {
   const [todayWaste, setTodayWaste] = useState<WasteEvent[]>([]);
   const [todayWastePending, setTodayWastePending] = useState(false);
   const [monthToDateSummaries, setMonthToDateSummaries] = useState<DailyWasteSummary[]>([]);
+  const [monthToDateDonations, setMonthToDateDonations] = useState<DonationRecord[]>([]);
   const [discardEvents, setDiscardEvents] = useState<DiscardEvent[]>([]);
   const [discardPending, setDiscardPending] = useState(false);
   const [sosEntries, setSosEntries] = useState<SosEntry[]>([]);
@@ -273,6 +295,13 @@ export function useStoreData(storeId: string | undefined, now: Date) {
         setCooldownTimers(timers);
         if (serverConfirmed) setCooldownTimersSynced(true);
       }, handleError),
+      subscribeDonationRecordsForDateRange(
+        storeId,
+        monthStart,
+        today,
+        setMonthToDateDonations,
+        handleError,
+      ),
     ];
     if (monthCompletedThrough) {
       subscriptions.push(subscribeDailyWasteSummaries(
@@ -314,6 +343,7 @@ export function useStoreData(storeId: string | undefined, now: Date) {
     settings,
     todayWaste,
     monthToDateSummaries,
+    monthToDateDonations,
     monthStart,
     monthCompletedThrough,
     discardEvents,

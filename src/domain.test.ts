@@ -7,11 +7,13 @@ import {
   buildDaypartTopWasteItems,
   buildDaypartTopWasteItemsFromDailySummaries,
   buildDonationCsv,
+  buildTopDonationWasteItems,
   buildProductCaseProjections,
   buildUsageScore,
   buildWasteCsv,
   buildWeekdayWasteCosts,
   cooldownProductQuantity,
+  completedEmptyDaypartsNeedingReview,
   currentUsagePresenceSlot,
   daypartWaste,
   detectDaypart,
@@ -104,6 +106,36 @@ describe('domain rules', () => {
       slotKey: 'lunch_0630',
     });
     expect(currentUsagePresenceSlot(DEFAULT_SETTINGS.dayparts, new Date(2026, 7, 4, 23, 0))).toBeNull();
+  });
+
+  it('finds completed empty dayparts that still need a team review', () => {
+    const breakfastEvent = event({
+      dayKey: '2026-08-04',
+      daypartId: 'breakfast',
+      eventAt: new Date(2026, 7, 4, 8, 0),
+    });
+    const pending = completedEmptyDaypartsNeedingReview({
+      dayparts: DEFAULT_SETTINGS.dayparts,
+      events: [breakfastEvent],
+      usageRecord: null,
+      selectedDayKey: '2026-08-04',
+      now: new Date(2026, 7, 4, 14, 1),
+    });
+    expect(pending.map((part) => part.id)).toEqual(['lunch']);
+
+    const reviewed = completedEmptyDaypartsNeedingReview({
+      dayparts: DEFAULT_SETTINGS.dayparts,
+      events: [breakfastEvent],
+      usageRecord: {
+        storeId: '00756',
+        dayKey: '2026-08-04',
+        zeroWasteDaypartIds: ['lunch'],
+        updatedAt: new Date(),
+      },
+      selectedDayKey: '2026-08-04',
+      now: new Date(2026, 7, 4, 14, 1),
+    });
+    expect(reviewed).toEqual([]);
   });
 
   it('requires donation evidence before a complete tracking day is statistics eligible', () => {
@@ -336,6 +368,45 @@ describe('domain rules', () => {
       previous: '2026-08-03',
     });
     expect(donationWindowDayKeys('2026-01-01').previous).toBe('2025-12-31');
+  });
+
+  it('ranks month-to-date donation waste by estimated product cost', () => {
+    const record = (selectedDayKey: string, actuals: Record<string, number>): DonationRecord => ({
+      storeId: '00756',
+      dayKey: selectedDayKey,
+      actuals,
+      predictions: {},
+      units: {},
+      variance: {},
+      initials: 'CL',
+      submittedAt: new Date(),
+      submittedBy: 'uid',
+      submittedByName: 'Store team',
+      revision: 2,
+    });
+    const settings = {
+      ...DEFAULT_SETTINGS,
+      products: DEFAULT_SETTINGS.products.map((product) => {
+        if (product.id === 'filets') return { ...product, unitCost: 2, averageWeightLb: 0.5 };
+        if (product.id === 'spicy') return { ...product, unitCost: 1.5, averageWeightLb: 0.5 };
+        return product;
+      }),
+      donationItems: [
+        { id: 'filet-donation', name: 'Filet', unit: 'lb' as const, sourceProductIds: ['filets'] },
+        { id: 'spicy-donation', name: 'Spicy', unit: 'lb' as const, sourceProductIds: ['spicy'] },
+        { id: 'unpriced', name: 'Biscuits', unit: 'each' as const, sourceProductIds: [] },
+      ],
+    };
+
+    const ranked = buildTopDonationWasteItems([
+      record('2026-08-03', { 'filet-donation': 4, 'spicy-donation': 3, unpriced: 100 }),
+      record('2026-08-04', { 'filet-donation': 1, 'spicy-donation': 4 }),
+      record('2026-08-09', { 'filet-donation': 100 }),
+    ], settings);
+
+    expect(ranked.map((item) => item.donationItemName)).toEqual(['Spicy', 'Filet']);
+    expect(ranked[0]).toMatchObject({ totalAmount: 7, estimatedCost: 21 });
+    expect(ranked[1]).toMatchObject({ totalAmount: 5, estimatedCost: 20 });
   });
 
   it('exports net waste grouped by daypart', () => {

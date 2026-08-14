@@ -376,6 +376,35 @@ export function currentUsagePresenceSlot(
   };
 }
 
+export function completedEmptyDaypartsNeedingReview({
+  dayparts,
+  events,
+  usageRecord,
+  selectedDayKey,
+  now,
+}: {
+  dayparts: DaypartConfig[];
+  events: WasteEvent[];
+  usageRecord: UsageDayRecord | null;
+  selectedDayKey: string;
+  now: Date;
+}): DaypartConfig[] {
+  const currentDayKey = dayKey(now);
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  return dayparts.filter((daypart) => {
+    const completed = selectedDayKey < currentDayKey
+      || (selectedDayKey === currentDayKey && nowMinutes >= daypart.endMinutes);
+    if (!completed) return false;
+    const hasWaste = events.some((event) => (
+      event.daypartId === daypart.id && event.equivalentUnits > 0
+    ));
+    const reviewed = usageRecord?.zeroWasteDaypartIds?.includes(daypart.id)
+      || usageRecord?.missedWasteDaypartIds?.includes(daypart.id)
+      || usageRecord?.uncertainWasteDaypartIds?.includes(daypart.id);
+    return !hasWaste && !reviewed;
+  });
+}
+
 function longestFalseRun(values: boolean[]): number {
   let longest = 0;
   let current = 0;
@@ -800,6 +829,55 @@ export function buildDaypartTopWasteItemsFromDailySummaries(
     });
   });
   return daypartTopWasteItemsFromTotals(totals, settings);
+}
+
+export interface DonationTopWasteItem {
+  donationItemId: string;
+  donationItemName: string;
+  productId: string;
+  tone: number;
+  unit: DonationItemConfig['unit'];
+  totalAmount: number;
+  estimatedCost: number;
+}
+
+export function buildTopDonationWasteItems(
+  records: DonationRecord[],
+  settings: AppSettings,
+  limit = 3,
+): DonationTopWasteItem[] {
+  const productMap = new Map(settings.products.map((product) => [product.id, product]));
+
+  return settings.donationItems.flatMap((item) => {
+    const products = item.sourceProductIds
+      .map((productId) => productMap.get(productId))
+      .filter((product): product is ProductConfig => Boolean(product));
+    const costRates = products.map((product) => {
+      if (item.unit === 'each') return product.unitCost;
+      return product.averageWeightLb > 0 ? product.unitCost / product.averageWeightLb : 0;
+    }).filter((costRate) => Number.isFinite(costRate) && costRate > 0);
+    if (costRates.length === 0) return [];
+
+    const totalAmount = records.reduce((total, record) => (
+      isOperatingDayKey(record.dayKey)
+        ? total + Math.max(0, record.actuals[item.id] || 0)
+        : total
+    ), 0);
+    if (totalAmount <= 0) return [];
+
+    const estimatedUnitCost = costRates.reduce((total, costRate) => total + costRate, 0) / costRates.length;
+    return [{
+      donationItemId: item.id,
+      donationItemName: item.name,
+      productId: products[0].id,
+      tone: products[0].tone,
+      unit: item.unit,
+      totalAmount,
+      estimatedCost: totalAmount * estimatedUnitCost,
+    }];
+  }).sort((a, b) => (
+    b.estimatedCost - a.estimatedCost || a.donationItemName.localeCompare(b.donationItemName)
+  )).slice(0, Math.max(0, limit));
 }
 
 export interface ProductCaseProjection {

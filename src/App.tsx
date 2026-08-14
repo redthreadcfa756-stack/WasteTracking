@@ -54,7 +54,9 @@ import {
 import { COOLDOWN_PANS, DEFAULT_SETTINGS } from './defaults';
 import {
   buildDaypartTopWasteItemsFromDailySummaries,
+  buildTopDonationWasteItems,
   buildUsageScore,
+  completedEmptyDaypartsNeedingReview,
   daypartWaste,
   dayKey,
   cooldownProductQuantity,
@@ -84,7 +86,7 @@ import {
 } from './domain';
 import { createDonationWorkbook, createWasteTrendWorkbook } from './exportWorkbook';
 import { firebaseConfigured } from './firebase';
-import { useAuthUser, useDeviceName, useDonationDayData, useMember, useNow, useOnlineStatus, useStoreData, useUsageData } from './hooks';
+import { useAuthUser, useDeviceName, useDonationDayData, useMember, useNow, useOnlineStatus, useStoreData, useUsageData, useUsageDayRecord } from './hooks';
 import type {
   AppSettings,
   CooldownTimer,
@@ -101,7 +103,7 @@ import type {
   WasteEvent,
 } from './types';
 
-type TabId = 'waste' | 'discard' | 'sos' | 'donations' | 'admin';
+type TabId = 'waste' | 'discard' | 'sos' | 'donations' | 'usage' | 'admin';
 type MenuSelection = 'auto' | MenuId;
 type ExportPeriod = 1 | 30 | 60 | 90 | WasteExportPreset | 'custom';
 const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || '00756';
@@ -110,6 +112,7 @@ const DISCARD_IDLE_TIMEOUT_MS = 45_000;
 const MENU_OVERRIDE_IDLE_TIMEOUT_MS = 2 * 60_000;
 const ADMIN_IDLE_TIMEOUT_MS = 2 * 60_000;
 const IDLE_WARNING_GRACE_MS = 15_000;
+const USAGE_REVIEW_DISMISS_MS = 15 * 60_000;
 
 function useIdleAction(enabled: boolean, timeoutMs: number, onTimeout: () => void) {
   const action = useRef(onTimeout);
@@ -157,6 +160,36 @@ function useIdleAction(enabled: boolean, timeoutMs: number, onTimeout: () => voi
       document.removeEventListener('visibilitychange', checkWhenVisible);
     };
   }, [enabled, timeoutMs]);
+}
+
+function useUsageOutcomeRecorder({ member, currentDay, deviceName, notify }: {
+  member: MemberProfile;
+  currentDay: string;
+  deviceName: string;
+  notify: (message: string) => void;
+}) {
+  return useCallback(async (daypartId: DaypartId, outcome: DaypartUsageOutcome) => {
+    try {
+      await recordDaypartUsageOutcome({
+        storeId: member.storeId,
+        selectedDayKey: currentDay,
+        daypartId,
+        outcome,
+        deviceName,
+        recordedBy: member.uid,
+      });
+      const message = outcome === 'zero-waste'
+        ? 'Zero Cool Down waste confirmed for that daypart.'
+        : outcome === 'missed-waste'
+          ? 'Known missed logging recorded. This daypart is not statistics eligible.'
+          : 'Uncertain daypart recorded. This daypart is not statistics eligible.';
+      notify(message);
+      return true;
+    } catch (caught) {
+      notify(errorMessage(caught));
+      return false;
+    }
+  }, [currentDay, deviceName, member.storeId, member.uid, notify]);
 }
 function confirmWrite<T>(write: Promise<T>): Promise<T> {
   return Promise.race([
@@ -422,6 +455,7 @@ const TABS: Array<{ id: TabId; label: string; icon: typeof Snowflake }> = [
   { id: 'discard', label: 'Discard', icon: Trash2 },
   { id: 'sos', label: 'SOS', icon: Timer },
   { id: 'donations', label: 'Donations', icon: Gift },
+  { id: 'usage', label: 'Usage', icon: ShieldCheck },
   { id: 'admin', label: 'Admin', icon: Settings },
 ];
 
@@ -536,6 +570,7 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
   const [timerActionBusy, setTimerActionBusy] = useState(false);
   const [alarmPlaybackBlocked, setAlarmPlaybackBlocked] = useState(false);
   const alarmActionInProgress = useRef(false);
+  const attemptedPresenceSlot = useRef('');
   const visibleTabs = TABS.filter((tab) => (
     (tab.id !== 'sos' || settings.sosEnabled)
     && (tab.id !== 'discard' || settings.discardTrackingEnabled)
@@ -558,6 +593,35 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
     setActiveTab('waste');
     notify(message);
   }, [notify]);
+
+  const presenceSlot = currentUsagePresenceSlot(settings.dayparts, now);
+
+  useEffect(() => {
+    if (
+      activeTab !== 'waste'
+      || testDaypartEnabled
+      || !presenceSlot
+      || !isOperatingDayKey(storeData.today)
+    ) return;
+    const recordPresence = () => {
+      if (
+        document.visibilityState !== 'visible'
+        || attemptedPresenceSlot.current === presenceSlot.slotKey
+      ) return;
+      attemptedPresenceSlot.current = presenceSlot.slotKey;
+      void recordUsageHeartbeat({
+        storeId: member.storeId,
+        selectedDayKey: storeData.today,
+        slotKey: presenceSlot.slotKey,
+        deviceName,
+        recordedBy: member.uid,
+      }).catch((caught) => notify(`Usage tracking: ${errorMessage(caught)}`));
+    };
+
+    recordPresence();
+    document.addEventListener('visibilitychange', recordPresence);
+    return () => document.removeEventListener('visibilitychange', recordPresence);
+  }, [activeTab, deviceName, member.storeId, member.uid, notify, presenceSlot?.slotKey, storeData.today, testDaypartEnabled]);
 
   useEffect(() => {
     const syncClock = () => setTimerNow(Date.now());
@@ -850,6 +914,7 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
             currentDay={storeData.today}
             now={now}
             monthToDateSummaries={storeData.monthToDateSummaries}
+            monthToDateDonations={storeData.monthToDateDonations}
             monthStartDayKey={storeData.monthStart}
             monthCompletedThrough={storeData.monthCompletedThrough}
             discardEvents={storeData.discardEvents}
@@ -900,6 +965,17 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
             settings={settings}
             member={member}
             currentDay={storeData.today}
+            notify={notify}
+          />
+        )}
+        {activeTab === 'usage' && (
+          <UsageTab
+            settings={settings}
+            events={storeData.todayWaste}
+            currentDay={storeData.today}
+            now={now}
+            member={member}
+            deviceName={deviceName}
             notify={notify}
           />
         )}
@@ -1015,6 +1091,7 @@ function WasteTab({
   currentDay,
   now,
   monthToDateSummaries,
+  monthToDateDonations,
   monthStartDayKey,
   monthCompletedThrough,
   discardEvents,
@@ -1037,6 +1114,7 @@ function WasteTab({
   currentDay: string;
   now: Date;
   monthToDateSummaries: DailyWasteSummary[];
+  monthToDateDonations: DonationRecord[];
   monthStartDayKey: string;
   monthCompletedThrough: string;
   discardEvents: DiscardEvent[];
@@ -1056,17 +1134,22 @@ function WasteTab({
 }) {
   const [nuggetPicker, setNuggetPicker] = useState<ProductConfig | null>(null);
   const [pendingPanQuantities, setPendingPanQuantities] = useState<Record<string, number>>({});
-  const [usageConfirmationBusy, setUsageConfirmationBusy] = useState<DaypartId | null>(null);
+  const [usageOutcomeBusy, setUsageOutcomeBusy] = useState<DaypartId | null>(null);
   const [usageReviewDaypart, setUsageReviewDaypart] = useState<DaypartId | null>(null);
+  const [, setUsageDismissalVersion] = useState(0);
   const previousServerPanQuantities = useRef<Record<string, number> | null>(null);
-  const attemptedPresenceSlot = useRef('');
-  const usageData = useUsageData(member.storeId, currentDay);
+  const usageDay = useUsageDayRecord(member.storeId, currentDay);
+  const recordUsageOutcome = useUsageOutcomeRecorder({ member, currentDay, deviceName, notify });
   const products = settings.products.filter((product) => (
     product.menus.includes(effectiveMenu) && !product.discardOnly
   ));
   const daypart = settings.dayparts.find((candidate) => candidate.id === targetDaypartId)!;
   const monthToDateTopWaste = buildDaypartTopWasteItemsFromDailySummaries(
     monthToDateSummaries,
+    settings,
+  );
+  const monthToDateTopDonations = buildTopDonationWasteItems(
+    monthToDateDonations,
     settings,
   );
   const monthToDateLabel = new Date(`${monthStartDayKey}T12:00:00`).toLocaleDateString([], {
@@ -1079,6 +1162,17 @@ function WasteTab({
       day: 'numeric',
     })}`
     : 'No completed days yet';
+  const emptyDaypartsNeedingReview = completedEmptyDaypartsNeedingReview({
+    dayparts: settings.dayparts,
+    events,
+    usageRecord: usageDay.record,
+    selectedDayKey: currentDay,
+    now,
+  });
+  const pendingUsageReview = usageDay.loading || usageDay.error ? undefined : emptyDaypartsNeedingReview.find((part) => {
+    const dismissalKey = `usage-review-dismissed-${member.storeId}-${currentDay}-${part.id}`;
+    return Number(localStorage.getItem(dismissalKey) || 0) <= now.getTime();
+  });
   const displayedEvents = testMode ? testEvents : events;
   const menuEvents = displayedEvents.filter((event) => event.menu === effectiveMenu);
   const coolDownDaypartEvents = displayedEvents.filter((event) => event.daypartId === targetDaypartId);
@@ -1092,16 +1186,6 @@ function WasteTab({
   const varianceDetail = Math.abs(targetVariance) < 0.005
     ? 'On target'
     : `${formatMoney(Math.abs(targetVariance))} ${targetVariance > 0 ? 'over' : 'under'} target`;
-  const presenceSlot = currentUsagePresenceSlot(settings.dayparts, now);
-  const usageScore = useMemo(() => buildUsageScore({
-    settings,
-    selectedDayKey: currentDay,
-    now,
-    currentWaste: events,
-    previousWaste: usageData.previousWaste,
-    donationRecord: usageData.donationRecord,
-    usageRecord: usageData.record,
-  }), [currentDay, events, now, settings, usageData.donationRecord, usageData.previousWaste, usageData.record]);
   const serverPanQuantities = Object.fromEntries(settings.products.map((product) => {
     const pan = COOLDOWN_PANS.find((candidate) => candidate.productIds.includes(product.id));
     const activeTimer = pan
@@ -1113,51 +1197,13 @@ function WasteTab({
     .map((product) => `${product.id}:${serverPanQuantities[product.id] || 0}`)
     .join('|');
 
-  useEffect(() => {
-    if (testMode || !presenceSlot || !isOperatingDayKey(currentDay)) return;
-    const recordPresence = () => {
-      if (
-        document.visibilityState !== 'visible'
-        || usageData.record?.activeSlotKeys?.includes(presenceSlot.slotKey)
-        || attemptedPresenceSlot.current === presenceSlot.slotKey
-      ) return;
-      attemptedPresenceSlot.current = presenceSlot.slotKey;
-      void recordUsageHeartbeat({
-        storeId: member.storeId,
-        selectedDayKey: currentDay,
-        slotKey: presenceSlot.slotKey,
-        deviceName,
-        recordedBy: member.uid,
-      }).catch((caught) => notify(`Usage tracking: ${errorMessage(caught)}`));
-    };
-
-    recordPresence();
-    document.addEventListener('visibilitychange', recordPresence);
-    return () => document.removeEventListener('visibilitychange', recordPresence);
-  }, [currentDay, deviceName, member.storeId, member.uid, notify, presenceSlot?.slotKey, testMode, usageData.record]);
-
-  const saveDaypartUsageOutcome = async (daypartId: DaypartId, outcome: DaypartUsageOutcome) => {
-    setUsageConfirmationBusy(daypartId);
-    try {
-      await recordDaypartUsageOutcome({
-        storeId: member.storeId,
-        selectedDayKey: currentDay,
-        daypartId,
-        outcome,
-        deviceName,
-        recordedBy: member.uid,
-      });
-      const message = outcome === 'zero-waste'
-        ? 'Zero Cool Down waste confirmed for that daypart.'
-        : outcome === 'missed-waste'
-          ? 'Known missed logging recorded. This daypart is not statistics eligible.'
-          : 'Uncertain daypart recorded. This daypart is not statistics eligible.';
-      notify(message);
+  const saveUsageOutcome = async (daypartId: DaypartId, outcome: DaypartUsageOutcome) => {
+    setUsageOutcomeBusy(daypartId);
+    const saved = await recordUsageOutcome(daypartId, outcome);
+    setUsageOutcomeBusy(null);
+    if (saved) {
+      localStorage.removeItem(`usage-review-dismissed-${member.storeId}-${currentDay}-${daypartId}`);
       setUsageReviewDaypart(null);
-    } catch (caught) {
-      notify(errorMessage(caught));
-    } finally {
-      setUsageConfirmationBusy(null);
     }
   };
 
@@ -1326,6 +1372,30 @@ function WasteTab({
           </button>
         </div>
       )}
+      {!testMode && pendingUsageReview && (
+        <div className="usage-review-reminder" role="status">
+          <AlertTriangle aria-hidden="true" />
+          <div>
+            <strong>{pendingUsageReview.label} ended with no Cool Down entries.</strong>
+            <span>Review what happened so today’s usage score is accurate.</span>
+          </div>
+          <div className="usage-review-reminder-actions">
+            <button
+              className="secondary-button small"
+              onClick={() => {
+                const dismissalKey = `usage-review-dismissed-${member.storeId}-${currentDay}-${pendingUsageReview.id}`;
+                localStorage.setItem(dismissalKey, String(Date.now() + USAGE_REVIEW_DISMISS_MS));
+                setUsageDismissalVersion((current) => current + 1);
+              }}
+            >
+              Later
+            </button>
+            <button className="primary-button small" onClick={() => setUsageReviewDaypart(pendingUsageReview.id)}>
+              Review now
+            </button>
+          </div>
+        </div>
+      )}
       <OperationalHeading
         eyebrow={testMode ? 'Test Daypart · Local session' : `${daypart.label} · ${formatMinutes(daypart.startMinutes)}–${formatMinutes(daypart.endMinutes)}`}
         title={testMode ? 'Practice cool down entry' : 'Log product entering cool down'}
@@ -1407,16 +1477,6 @@ function WasteTab({
       />
 
       {!testMode && (
-        <UsageScorePanel
-          score={usageScore}
-          loading={usageData.loading}
-          error={usageData.error}
-          confirmationBusy={usageConfirmationBusy}
-          onReviewDaypart={setUsageReviewDaypart}
-        />
-      )}
-
-      {!testMode && (
         <section className="mtd-waste-summary" aria-labelledby="mtd-waste-title">
           <div className="section-heading activity-heading">
             <div>
@@ -1444,6 +1504,38 @@ function WasteTab({
         </section>
       )}
 
+      {!testMode && (
+        <section className="mtd-waste-summary" aria-labelledby="mtd-donations-title">
+          <div className="section-heading activity-heading">
+            <div>
+              <p className="eyebrow">
+                {monthToDateLabel} · Through today · Submitted donations · Estimated using current pricing
+              </p>
+              <h2 id="mtd-donations-title">Month-to-date top 3 waste items by donations</h2>
+            </div>
+          </div>
+          {monthToDateTopDonations.length > 0 ? (
+            <div className="mtd-waste-grid mtd-donation-grid">
+              {monthToDateTopDonations.map((summary, index) => (
+                <div className={`mtd-waste-card tone-${summary.tone}`} key={summary.donationItemId}>
+                  <span>#{index + 1} donated waste</span>
+                  <strong>{summary.donationItemName}</strong>
+                  <span className="mtd-waste-cost">{formatMoney(summary.estimatedCost)}</span>
+                  <span className="mtd-donation-quantity">
+                    {formatQuantity(summary.totalAmount)} {summary.unit}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="empty-state">No priced donation submissions recorded this month.</div>
+          )}
+          <p className="footnote">
+            Ranking includes donation items linked to configured products. Items without product pricing are not compared across pounds and individual counts.
+          </p>
+        </section>
+      )}
+
       {nuggetPicker && (
         <IndividualNuggetPicker
           product={nuggetPicker}
@@ -1455,11 +1547,11 @@ function WasteTab({
       {usageReviewDaypart && (
         <DaypartUsageReview
           daypartLabel={settings.dayparts.find((part) => part.id === usageReviewDaypart)?.label || usageReviewDaypart}
-          busy={usageConfirmationBusy === usageReviewDaypart}
+          busy={usageOutcomeBusy === usageReviewDaypart}
           onClose={() => {
-            if (!usageConfirmationBusy) setUsageReviewDaypart(null);
+            if (!usageOutcomeBusy) setUsageReviewDaypart(null);
           }}
-          onSelect={(outcome) => void saveDaypartUsageOutcome(usageReviewDaypart, outcome)}
+          onSelect={(outcome) => void saveUsageOutcome(usageReviewDaypart, outcome)}
         />
       )}
     </section>
@@ -1766,6 +1858,59 @@ function RecentProductActivity({ eyebrow, title, emptyText, entries, products, o
         })}
       </div>
     </>
+  );
+}
+
+function UsageTab({ settings, events, currentDay, now, member, deviceName, notify }: {
+  settings: AppSettings;
+  events: WasteEvent[];
+  currentDay: string;
+  now: Date;
+  member: MemberProfile;
+  deviceName: string;
+  notify: (message: string) => void;
+}) {
+  const usageData = useUsageData(member.storeId, currentDay);
+  const [outcomeBusy, setOutcomeBusy] = useState<DaypartId | null>(null);
+  const [reviewDaypart, setReviewDaypart] = useState<DaypartId | null>(null);
+  const recordUsageOutcome = useUsageOutcomeRecorder({ member, currentDay, deviceName, notify });
+  const usageScore = useMemo(() => buildUsageScore({
+    settings,
+    selectedDayKey: currentDay,
+    now,
+    currentWaste: events,
+    previousWaste: usageData.previousWaste,
+    donationRecord: usageData.donationRecord,
+    usageRecord: usageData.record,
+  }), [currentDay, events, now, settings, usageData.donationRecord, usageData.previousWaste, usageData.record]);
+
+  const saveDaypartUsageOutcome = async (daypartId: DaypartId, outcome: DaypartUsageOutcome) => {
+    setOutcomeBusy(daypartId);
+    const saved = await recordUsageOutcome(daypartId, outcome);
+    setOutcomeBusy(null);
+    if (saved) setReviewDaypart(null);
+  };
+
+  return (
+    <section className="panel-stack">
+      <UsageScorePanel
+        score={usageScore}
+        loading={usageData.loading}
+        error={usageData.error}
+        confirmationBusy={outcomeBusy}
+        onReviewDaypart={setReviewDaypart}
+      />
+      {reviewDaypart && (
+        <DaypartUsageReview
+          daypartLabel={settings.dayparts.find((part) => part.id === reviewDaypart)?.label || reviewDaypart}
+          busy={outcomeBusy === reviewDaypart}
+          onClose={() => {
+            if (!outcomeBusy) setReviewDaypart(null);
+          }}
+          onSelect={(outcome) => void saveDaypartUsageOutcome(reviewDaypart, outcome)}
+        />
+      )}
+    </section>
   );
 }
 
