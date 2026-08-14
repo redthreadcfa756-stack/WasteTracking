@@ -29,6 +29,7 @@ import {
   quantityAdjustmentFromDrag,
   targetCasesForProduct,
   targetDollarForProduct,
+  USAGE_PRESENCE_START_DAY,
   usagePresenceSlotKey,
   wasteExportPresetRange,
   weightToPounds,
@@ -236,6 +237,40 @@ describe('domain rules', () => {
     expect(result.reasons).toContain('Breakfast: Team could not confirm whether the empty daypart was accurate');
     expect(result.reasons).toContain('Lunch: Team reported that waste occurred but was not logged');
     expect(result.reportEligible).toBe(false);
+  });
+
+  it('excludes presence checks from daily scores before the presence launch date', () => {
+    expect(USAGE_PRESENCE_START_DAY).toBe('2026-08-15');
+    const settings = {
+      ...DEFAULT_SETTINGS,
+      dayparts: [{
+        ...DEFAULT_SETTINGS.dayparts[0],
+        startMinutes: 390,
+        endMinutes: 450,
+      }],
+    };
+    const scoreFor = (selectedDayKey: string) => buildUsageScore({
+      settings,
+      selectedDayKey,
+      now: new Date(2026, 7, 16, 12, 0),
+      currentWaste: [event({
+        dayKey: selectedDayKey,
+        daypartId: 'breakfast',
+        eventAt: new Date(`${selectedDayKey}T07:00:00`),
+      })],
+      previousWaste: [],
+      donationRecord: null,
+      usageRecord: null,
+    });
+
+    const beforeLaunch = scoreFor('2026-08-14');
+    expect(beforeLaunch).toMatchObject({ presenceMeasured: false, coverageScore: null, score: 100 });
+    expect(beforeLaunch.dayparts[0]).toMatchObject({ presenceMeasured: false, coverageScore: null });
+
+    const launchDay = scoreFor('2026-08-15');
+    expect(launchDay.presenceMeasured).toBe(true);
+    expect(launchDay.coverageScore).toBe(0);
+    expect(launchDay.score).toBeLessThan(beforeLaunch.score);
   });
 
   it('merges repeated taps by product and minute', () => {

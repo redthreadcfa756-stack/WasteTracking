@@ -1199,6 +1199,8 @@ label,
   gap: 0.8rem;
   margin-top: 0.45rem;
 }
+.usage-score-heading { align-items: end; }
+.usage-date-control { width: min(220px, 100%); }
 
 .usage-review-reminder {
   display: grid;
@@ -1249,6 +1251,7 @@ label,
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
+.usage-eligibility-badge { justify-self: end; max-width: 250px; line-height: 1.3; text-align: right; }
 .usage-eligibility-badge svg,
 .usage-confirmed svg { width: 16px; height: 16px; }
 .status-reliable .usage-eligibility-badge,
@@ -1317,10 +1320,13 @@ label,
 
 @media (max-width: 759px) {
   .mtd-donation-grid { grid-template-columns: 1fr; }
+  .usage-score-heading { align-items: stretch; }
+  .usage-date-control { width: 100%; }
   .usage-review-reminder { grid-template-columns: auto minmax(0, 1fr); }
   .usage-review-reminder-actions { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; }
   .usage-score-hero { grid-template-columns: auto minmax(0, 1fr); }
   .usage-eligibility-badge { grid-column: 1 / -1; }
+  .usage-eligibility-badge { justify-self: start; max-width: none; text-align: left; }
   .usage-component-grid { grid-template-columns: 1fr; }
 
   .admin-strip {

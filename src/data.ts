@@ -229,6 +229,7 @@ export async function ensureDailyWasteSummaries(
   storeId: string,
   startDayKey: string,
   endDayKey: string,
+  { forceRebuild = false }: { forceRebuild?: boolean } = {},
 ): Promise<void> {
   const requiredDayKeys = operatingDayKeysInRange(startDayKey, endDayKey);
   if (requiredDayKeys.length === 0) return;
@@ -241,11 +242,13 @@ export async function ensureDailyWasteSummaries(
     where('dayKey', '<=', endDayKey),
   ));
   const existingDayKeys = new Set(existingSnapshot.docs.map((summaryDoc) => summaryDoc.id));
-  const missingDayKeys = requiredDayKeys.filter((selectedDayKey) => !existingDayKeys.has(selectedDayKey));
-  if (missingDayKeys.length === 0) return;
+  const dayKeysToBuild = forceRebuild
+    ? requiredDayKeys
+    : requiredDayKeys.filter((selectedDayKey) => !existingDayKeys.has(selectedDayKey));
+  if (dayKeysToBuild.length === 0) return;
 
   const computedBy = services.auth.currentUser?.uid || '';
-  const summaries = await Promise.all(missingDayKeys.map(async (selectedDayKey) => {
+  const summaries = await Promise.all(dayKeysToBuild.map(async (selectedDayKey) => {
     const eventsSnapshot = await getDocs(query(
       collection(services.db, 'stores', storeId, 'wasteEvents'),
       where('dayKey', '==', selectedDayKey),

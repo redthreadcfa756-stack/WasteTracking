@@ -79,6 +79,7 @@ import {
   operatingDayCount,
   targetCasesForProduct,
   targetDollarForProduct,
+  USAGE_PRESENCE_START_DAY,
   wasteExportPresetRange,
   withDerivedProductPricing,
   type WasteExportPreset,
@@ -181,8 +182,8 @@ function useUsageOutcomeRecorder({ member, currentDay, deviceName, notify }: {
       const message = outcome === 'zero-waste'
         ? 'Zero Cool Down waste confirmed for that daypart.'
         : outcome === 'missed-waste'
-          ? 'Known missed logging recorded. This daypart is not statistics eligible.'
-          : 'Uncertain daypart recorded. This daypart is not statistics eligible.';
+          ? 'Known missed logging recorded. There is insufficient data for reliable insights.'
+          : 'Uncertain daypart recorded. There is insufficient data for reliable insights.';
       notify(message);
       return true;
     } catch (caught) {
@@ -602,6 +603,7 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
       || testDaypartEnabled
       || !presenceSlot
       || !isOperatingDayKey(storeData.today)
+      || storeData.today < USAGE_PRESENCE_START_DAY
     ) return;
     const recordPresence = () => {
       if (
@@ -971,7 +973,6 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
         {activeTab === 'usage' && (
           <UsageTab
             settings={settings}
-            events={storeData.todayWaste}
             currentDay={storeData.today}
             now={now}
             member={member}
@@ -1861,28 +1862,31 @@ function RecentProductActivity({ eyebrow, title, emptyText, entries, products, o
   );
 }
 
-function UsageTab({ settings, events, currentDay, now, member, deviceName, notify }: {
+function UsageTab({ settings, currentDay, now, member, deviceName, notify }: {
   settings: AppSettings;
-  events: WasteEvent[];
   currentDay: string;
   now: Date;
   member: MemberProfile;
   deviceName: string;
   notify: (message: string) => void;
 }) {
-  const usageData = useUsageData(member.storeId, currentDay);
+  const [selectedDay, setSelectedDay] = useState(currentDay);
+  const usageData = useUsageData(member.storeId, selectedDay);
   const [outcomeBusy, setOutcomeBusy] = useState<DaypartId | null>(null);
   const [reviewDaypart, setReviewDaypart] = useState<DaypartId | null>(null);
-  const recordUsageOutcome = useUsageOutcomeRecorder({ member, currentDay, deviceName, notify });
+  const recordUsageOutcome = useUsageOutcomeRecorder({ member, currentDay: selectedDay, deviceName, notify });
+
+  useEffect(() => setSelectedDay(currentDay), [currentDay]);
+
   const usageScore = useMemo(() => buildUsageScore({
     settings,
-    selectedDayKey: currentDay,
+    selectedDayKey: selectedDay,
     now,
-    currentWaste: events,
+    currentWaste: usageData.currentWaste,
     previousWaste: usageData.previousWaste,
     donationRecord: usageData.donationRecord,
     usageRecord: usageData.record,
-  }), [currentDay, events, now, settings, usageData.donationRecord, usageData.previousWaste, usageData.record]);
+  }), [now, selectedDay, settings, usageData.currentWaste, usageData.donationRecord, usageData.previousWaste, usageData.record]);
 
   const saveDaypartUsageOutcome = async (daypartId: DaypartId, outcome: DaypartUsageOutcome) => {
     setOutcomeBusy(daypartId);
@@ -1899,6 +1903,9 @@ function UsageTab({ settings, events, currentDay, now, member, deviceName, notif
         error={usageData.error}
         confirmationBusy={outcomeBusy}
         onReviewDaypart={setReviewDaypart}
+        selectedDay={selectedDay}
+        currentDay={currentDay}
+        onSelectedDay={setSelectedDay}
       />
       {reviewDaypart && (
         <DaypartUsageReview
@@ -1914,12 +1921,15 @@ function UsageTab({ settings, events, currentDay, now, member, deviceName, notif
   );
 }
 
-function UsageScorePanel({ score, loading, error, confirmationBusy, onReviewDaypart }: {
+function UsageScorePanel({ score, loading, error, confirmationBusy, onReviewDaypart, selectedDay, currentDay, onSelectedDay }: {
   score: ReturnType<typeof buildUsageScore>;
   loading: boolean;
   error: string;
   confirmationBusy: DaypartId | null;
   onReviewDaypart: (daypartId: DaypartId) => void;
+  selectedDay: string;
+  currentDay: string;
+  onSelectedDay: (selectedDay: string) => void;
 }) {
   const statusLabel = score.status === 'reliable'
     ? 'Reliable for reporting'
@@ -1931,11 +1941,22 @@ function UsageScorePanel({ score, loading, error, confirmationBusy, onReviewDayp
 
   return (
     <section className="usage-score-section" aria-labelledby="usage-score-title">
-      <div className="section-heading activity-heading">
+      <div className="section-heading activity-heading usage-score-heading">
         <div>
-          <p className="eyebrow">Tracking coverage · Continuity · Donation reconciliation</p>
-          <h2 id="usage-score-title">System usage</h2>
+          <p className="eyebrow">One day at a time · Continuity · Donation reconciliation</p>
+          <h2 id="usage-score-title">Daily system usage</h2>
         </div>
+        <label className="compact-control usage-date-control">
+          Usage date
+          <input
+            type="date"
+            value={selectedDay}
+            max={currentDay}
+            onChange={(event) => {
+              if (event.target.value) onSelectedDay(event.target.value);
+            }}
+          />
+        </label>
       </div>
       {error && <div className="error-banner" role="alert">Usage evidence could not sync: {error}</div>}
       {loading ? (
@@ -1953,12 +1974,18 @@ function UsageScorePanel({ score, loading, error, confirmationBusy, onReviewDayp
             </div>
             <span className="usage-eligibility-badge">
               {score.reportEligible ? <Check aria-hidden="true" /> : <AlertTriangle aria-hidden="true" />}
-              {score.reportEligible ? 'Statistics eligible' : 'Not statistics eligible'}
+              {score.reportEligible ? 'Reliable data available' : 'Insufficient data for reliable insights'}
             </span>
           </div>
 
           <div className="usage-component-grid">
-            <Stat label="Cool Down presence" value={`${score.coverageScore}%`} detail="15-minute visible-page checks · 45% of score" />
+            <Stat
+              label="Cool Down presence"
+              value={score.coverageScore === null ? 'Not measured' : `${score.coverageScore}%`}
+              detail={score.presenceMeasured
+                ? '15-minute visible-page checks · 45% of score'
+                : 'Scoring began Aug 15, 2026 · excluded from this day'}
+            />
             <Stat label="Logging continuity" value={`${score.continuityScore}%`} detail="Unexplained three-hour gaps · 25% of score" />
             <Stat
               label="Donation reconciliation"
@@ -1975,7 +2002,9 @@ function UsageScorePanel({ score, loading, error, confirmationBusy, onReviewDayp
                   <span>{daypart.label}</span>
                   <strong>{daypart.score}</strong>
                 </div>
-                <small>{daypart.activeSlots}/{daypart.expectedSlots} presence checks · {daypart.eventCount} entries</small>
+                <small>{daypart.presenceMeasured
+                  ? `${daypart.activeSlots}/${daypart.expectedSlots} presence checks · ${daypart.eventCount} entries`
+                  : `Presence not measured · ${daypart.eventCount} entries`}</small>
                 {daypart.confirmedZeroWaste && <span className="usage-confirmed"><Check aria-hidden="true" /> Zero waste confirmed</span>}
                 {daypart.missedWaste && <span className="usage-outcome-failed"><AlertTriangle aria-hidden="true" /> Waste was not logged</span>}
                 {daypart.uncertainWaste && <span className="usage-outcome-failed"><AlertTriangle aria-hidden="true" /> Accuracy is uncertain</span>}

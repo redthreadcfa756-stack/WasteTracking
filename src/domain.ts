@@ -322,6 +322,7 @@ export function donationPrediction(
 export const USAGE_RELIABLE_MINIMUM = 90;
 export const USAGE_CAUTION_MINIMUM = 75;
 export const USAGE_DONATION_TOLERANCE = 0.25;
+export const USAGE_PRESENCE_START_DAY = '2026-08-15';
 
 export type UsageScoreStatus = 'reliable' | 'provisional' | 'caution' | 'unreliable';
 
@@ -329,7 +330,8 @@ export interface DaypartUsageScore {
   daypartId: DaypartId;
   label: string;
   score: number;
-  coverageScore: number;
+  coverageScore: number | null;
+  presenceMeasured: boolean;
   continuityScore: number;
   activeSlots: number;
   expectedSlots: number;
@@ -348,7 +350,8 @@ export interface UsageScoreResult {
   status: UsageScoreStatus;
   reportEligible: boolean;
   minimumRequired: number;
-  coverageScore: number;
+  coverageScore: number | null;
+  presenceMeasured: boolean;
   continuityScore: number;
   donationScore: number | null;
   dayparts: DaypartUsageScore[];
@@ -434,6 +437,7 @@ export function buildUsageScore({
 }): UsageScoreResult {
   const currentDayKey = dayKey(now);
   const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  const presenceMeasured = selectedDayKey >= USAGE_PRESENCE_START_DAY;
   const dayparts = settings.dayparts.flatMap<DaypartUsageScore>((daypart) => {
     const elapsedEnd = selectedDayKey < currentDayKey
       ? daypart.endMinutes
@@ -446,10 +450,12 @@ export function buildUsageScore({
     for (let cursor = daypart.startMinutes; cursor < elapsedEnd; cursor += 15) {
       expectedSlotKeys.push(usagePresenceSlotKey(daypart.id, cursor));
     }
-    const activeSlots = expectedSlotKeys.filter((slotKey) => usageRecord?.activeSlotKeys?.includes(slotKey)).length;
-    const coverageScore = expectedSlotKeys.length
-      ? activeSlots / expectedSlotKeys.length * 100
-      : 100;
+    const activeSlots = presenceMeasured
+      ? expectedSlotKeys.filter((slotKey) => usageRecord?.activeSlotKeys?.includes(slotKey)).length
+      : 0;
+    const coverageScore = presenceMeasured
+      ? expectedSlotKeys.length ? activeSlots / expectedSlotKeys.length * 100 : 100
+      : null;
     const daypartEvents = currentWaste.filter((event) => (
       event.daypartId === daypart.id && event.equivalentUnits > 0
     ));
@@ -477,9 +483,10 @@ export function buildUsageScore({
       : needsUsageReview || missedWaste || uncertainWaste
         ? 0
         : Math.max(0, 100 - Math.max(0, longestUnloggedHours - 2) * 25);
-    const score = Math.round((coverageScore * 45 + continuityScore * 25) / 70);
+    const scoreWeight = presenceMeasured ? 70 : 25;
+    const score = Math.round(((coverageScore || 0) * (presenceMeasured ? 45 : 0) + continuityScore * 25) / scoreWeight);
     const reasons: string[] = [];
-    if (coverageScore < USAGE_RELIABLE_MINIMUM) {
+    if (presenceMeasured && coverageScore !== null && coverageScore < USAGE_RELIABLE_MINIMUM) {
       reasons.push(`${activeSlots} of ${expectedSlotKeys.length} presence checks recorded`);
     }
     if (needsUsageReview) reasons.push('No Cool Down waste logged and the daypart has not been reviewed');
@@ -491,7 +498,8 @@ export function buildUsageScore({
       daypartId: daypart.id,
       label: daypart.label,
       score,
-      coverageScore: Math.round(coverageScore),
+      coverageScore: coverageScore === null ? null : Math.round(coverageScore),
+      presenceMeasured,
       continuityScore: Math.round(continuityScore),
       activeSlots,
       expectedSlots: expectedSlotKeys.length,
@@ -508,7 +516,9 @@ export function buildUsageScore({
 
   const totalExpectedSlots = dayparts.reduce((sum, daypart) => sum + daypart.expectedSlots, 0);
   const totalActiveSlots = dayparts.reduce((sum, daypart) => sum + daypart.activeSlots, 0);
-  const coverageScore = totalExpectedSlots ? totalActiveSlots / totalExpectedSlots * 100 : 0;
+  const coverageScore = presenceMeasured
+    ? totalExpectedSlots ? totalActiveSlots / totalExpectedSlots * 100 : 0
+    : null;
   const continuityWeight = dayparts.reduce((sum, daypart) => sum + Math.max(1, Math.ceil(daypart.expectedSlots / 4)), 0);
   const continuityScore = continuityWeight
     ? dayparts.reduce((sum, daypart) => (
@@ -536,10 +546,10 @@ export function buildUsageScore({
       : 100;
   }
 
-  const baseWeighted = coverageScore * 45 + continuityScore * 25;
-  const score = Math.round(donationScore === null
-    ? baseWeighted / 70
-    : (baseWeighted + donationScore * 30) / 100);
+  const baseWeight = presenceMeasured ? 70 : 25;
+  const baseWeighted = (coverageScore || 0) * (presenceMeasured ? 45 : 0) + continuityScore * 25;
+  const scoreWeight = baseWeight + (donationScore === null ? 0 : 30);
+  const score = Math.round((baseWeighted + (donationScore || 0) * (donationScore === null ? 0 : 30)) / scoreWeight);
   const hasCriticalGap = dayparts.some((daypart) => (
     daypart.needsUsageReview || daypart.missedWaste || daypart.uncertainWaste
   ));
@@ -558,14 +568,19 @@ export function buildUsageScore({
   ];
   if (!donationRecord) reasons.push('Donation reconciliation is pending for this donation window');
   else if (donationScore !== null && donationScore < 80) reasons.push('Donation reconciliation is below the required 80%');
-  if (reasons.length === 0) reasons.push('Presence, continuity, and donations all support reliable reporting');
+  if (reasons.length === 0) {
+    reasons.push(presenceMeasured
+      ? 'Presence, continuity, and donations all support reliable reporting'
+      : 'Continuity and donations support reliable reporting; presence was not measured for this date');
+  }
 
   return {
     score,
     status,
     reportEligible,
     minimumRequired: USAGE_RELIABLE_MINIMUM,
-    coverageScore: Math.round(coverageScore),
+    coverageScore: coverageScore === null ? null : Math.round(coverageScore),
+    presenceMeasured,
     continuityScore: Math.round(continuityScore),
     donationScore: donationScore === null ? null : Math.round(donationScore),
     dayparts,

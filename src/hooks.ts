@@ -143,6 +143,7 @@ export function useDonationDayData(storeId: string, selectedDayKey: string) {
 export function useUsageData(storeId: string, selectedDayKey: string) {
   const previousDay = donationWindowDayKeys(selectedDayKey).previous;
   const [record, setRecord] = useState<UsageDayRecord | null>(null);
+  const [currentWaste, setCurrentWaste] = useState<WasteEvent[]>([]);
   const [previousWaste, setPreviousWaste] = useState<WasteEvent[]>([]);
   const [donationRecord, setDonationRecord] = useState<DonationRecord | null>(null);
   const [readyParts, setReadyParts] = useState(0);
@@ -151,16 +152,21 @@ export function useUsageData(storeId: string, selectedDayKey: string) {
   useEffect(() => {
     let disposed = false;
     let usageReady = false;
-    let wasteReady = false;
+    let currentWasteReady = false;
+    let previousWasteReady = false;
     let donationReady = false;
     const markReady = () => {
-      if (!disposed && usageReady && wasteReady && donationReady) setReadyParts(3);
+      if (!disposed && usageReady && currentWasteReady && previousWasteReady && donationReady) setReadyParts(4);
     };
     const handleError = (caught: { message: string }) => {
-      if (!disposed) setError(caught.message);
+      if (!disposed) {
+        setError(caught.message);
+        setReadyParts(4);
+      }
     };
 
     setRecord(null);
+    setCurrentWaste([]);
     setPreviousWaste([]);
     setDonationRecord(null);
     setReadyParts(0);
@@ -173,10 +179,16 @@ export function useUsageData(storeId: string, selectedDayKey: string) {
         usageReady = true;
         markReady();
       }, handleError),
+      subscribeWasteForDay(storeId, selectedDayKey, (events) => {
+        if (disposed) return;
+        setCurrentWaste(events);
+        currentWasteReady = true;
+        markReady();
+      }, handleError),
       subscribeWasteForDay(storeId, previousDay, (events) => {
         if (disposed) return;
         setPreviousWaste(events);
-        wasteReady = true;
+        previousWasteReady = true;
         markReady();
       }, handleError),
       subscribeDonationRecord(storeId, selectedDayKey, (nextRecord) => {
@@ -195,9 +207,10 @@ export function useUsageData(storeId: string, selectedDayKey: string) {
 
   return {
     record,
+    currentWaste,
     previousWaste,
     donationRecord,
-    loading: readyParts < 3,
+    loading: readyParts < 4,
     error,
   };
 }
@@ -311,10 +324,15 @@ export function useStoreData(storeId: string | undefined, now: Date) {
         setMonthToDateSummaries,
         handleError,
       ));
-      const summaryCheckKey = `waste-daily-summaries-${storeId}-${today}`;
+      const summaryCheckKey = `waste-daily-summaries-v2-${storeId}-${today}`;
+      const summaryRepairKey = `waste-daily-summaries-repair-v2-${storeId}`;
       if (localStorage.getItem(summaryCheckKey) !== 'complete') {
-        void ensureDailyWasteSummaries(storeId, monthStart, monthCompletedThrough)
-          .then(() => localStorage.setItem(summaryCheckKey, 'complete'))
+        const forceRebuild = localStorage.getItem(summaryRepairKey) !== 'complete';
+        void ensureDailyWasteSummaries(storeId, monthStart, monthCompletedThrough, { forceRebuild })
+          .then(() => {
+            localStorage.setItem(summaryRepairKey, 'complete');
+            localStorage.setItem(summaryCheckKey, 'complete');
+          })
           .catch(handleError);
       }
     } else {
