@@ -4,6 +4,8 @@ An iOS-first installable web app with live multi-device cool down tracking, loop
 
 Production builds emit a unique `version.json`. Open pages check it every minute and whenever they regain focus or connectivity; after detecting a deployment, they wait for five seconds without user input and reload into the new build automatically. This version check uses only a tiny static file and does not consume Firestore reads.
 
+Cool Down is the default operational page. Discard is treated as a temporary workflow and automatically returns to Cool Down after 45 seconds without a tap, slide, keyboard entry, menu change, or other form activity.
+
 ## Architecture
 
 - **GitHub** stores the source and runs tests on every production push.

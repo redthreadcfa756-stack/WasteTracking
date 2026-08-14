@@ -100,6 +100,7 @@ type MenuSelection = 'auto' | MenuId;
 type ExportPeriod = 1 | 30 | 60 | 90 | WasteExportPreset | 'custom';
 const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || '00756';
 const WRITE_TIMEOUT_MS = 8_000;
+const DISCARD_IDLE_TIMEOUT_MS = 45_000;
 function confirmWrite<T>(write: Promise<T>): Promise<T> {
   return Promise.race([
     write,
@@ -509,6 +510,56 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
       setActiveTab('waste');
     }
   }, [activeTab, settings.sosEnabled, settings.discardTrackingEnabled]);
+
+  useEffect(() => {
+    if (activeTab !== 'discard') return;
+    let lastActivityAt = Date.now();
+    let timeoutId = 0;
+    let returned = false;
+    const returnToCooldown = () => {
+      if (returned) return;
+      returned = true;
+      const message = 'Returned to Cool Down after 45 seconds of inactivity.';
+      setActiveTab('waste');
+      setToast(message);
+      window.setTimeout(() => {
+        setToast((current) => current === message ? '' : current);
+      }, 2_600);
+    };
+    const checkIdle = () => {
+      const remaining = DISCARD_IDLE_TIMEOUT_MS - (Date.now() - lastActivityAt);
+      if (remaining <= 0) {
+        returnToCooldown();
+        return;
+      }
+      timeoutId = window.setTimeout(checkIdle, remaining);
+    };
+    const markActivity = () => {
+      lastActivityAt = Date.now();
+      window.clearTimeout(timeoutId);
+      timeoutId = window.setTimeout(checkIdle, DISCARD_IDLE_TIMEOUT_MS);
+    };
+    const checkWhenVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      window.clearTimeout(timeoutId);
+      checkIdle();
+    };
+
+    markActivity();
+    window.addEventListener('pointerdown', markActivity, true);
+    window.addEventListener('keydown', markActivity, true);
+    window.addEventListener('input', markActivity, true);
+    window.addEventListener('change', markActivity, true);
+    document.addEventListener('visibilitychange', checkWhenVisible);
+    return () => {
+      window.clearTimeout(timeoutId);
+      window.removeEventListener('pointerdown', markActivity, true);
+      window.removeEventListener('keydown', markActivity, true);
+      window.removeEventListener('input', markActivity, true);
+      window.removeEventListener('change', markActivity, true);
+      document.removeEventListener('visibilitychange', checkWhenVisible);
+    };
+  }, [activeTab]);
 
   useEffect(() => {
     if (activeTab === 'donations' || activeTab === 'admin' || adminPrompt) return;
@@ -1616,7 +1667,7 @@ function DiscardTab({
     <section className="panel-stack">
       <div className="section-heading">
         <div>
-          <p className="eyebrow">{daypart.label} · Direct to trash</p>
+          <p className="eyebrow">{daypart.label} · Direct to trash · Returns to Cool Down after 45 seconds idle</p>
           <h2>Log product that skips cool down</h2>
         </div>
         <label className="compact-control">
