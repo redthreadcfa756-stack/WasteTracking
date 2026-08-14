@@ -1,6 +1,8 @@
 import {
   AlertTriangle,
+  CalendarDays,
   Check,
+  ChevronLeft,
   ChevronRight,
   Clock3,
   Cloud,
@@ -1986,6 +1988,111 @@ function MonthToDateUsagePanel({ report, loading, error, monthLabel }: {
   );
 }
 
+function UsageDatePicker({ selectedDay, latestCompletedDay, onSelectedDay }: {
+  selectedDay: string;
+  latestCompletedDay: string;
+  onSelectedDay: (selectedDay: string) => void;
+}) {
+  const detailsRef = useRef<HTMLDetailsElement | null>(null);
+  const selectedDate = useMemo(() => new Date(`${selectedDay}T12:00:00`), [selectedDay]);
+  const latestDate = useMemo(() => new Date(`${latestCompletedDay}T12:00:00`), [latestCompletedDay]);
+  const [displayMonth, setDisplayMonth] = useState(() => (
+    new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1, 12)
+  ));
+
+  useEffect(() => {
+    setDisplayMonth(new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1, 12));
+  }, [selectedDate]);
+
+  useEffect(() => {
+    const closeOnOutsidePress = (event: globalThis.PointerEvent) => {
+      if (detailsRef.current?.open && !detailsRef.current.contains(event.target as Node)) {
+        detailsRef.current.removeAttribute('open');
+      }
+    };
+    document.addEventListener('pointerdown', closeOnOutsidePress);
+    return () => document.removeEventListener('pointerdown', closeOnOutsidePress);
+  }, []);
+
+  const calendarDays = useMemo(() => {
+    const gridStart = new Date(displayMonth);
+    gridStart.setDate(1 - gridStart.getDay());
+    return Array.from({ length: 42 }, (_, index) => {
+      const date = new Date(gridStart);
+      date.setDate(gridStart.getDate() + index);
+      return date;
+    });
+  }, [displayMonth]);
+  const nextMonthUnavailable = displayMonth.getFullYear() > latestDate.getFullYear()
+    || (displayMonth.getFullYear() === latestDate.getFullYear()
+      && displayMonth.getMonth() >= latestDate.getMonth());
+  const selectedLabel = selectedDate.toLocaleDateString([], {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+
+  return (
+    <div className="compact-control usage-date-control">
+      <span className="usage-date-label">Usage date</span>
+      <details className="usage-date-picker" ref={detailsRef}>
+        <summary><CalendarDays aria-hidden="true" /> {selectedLabel}</summary>
+        <div className="usage-calendar" role="dialog" aria-label="Choose usage date">
+          <div className="usage-calendar-header">
+            <button
+              type="button"
+              aria-label="Previous month"
+              onClick={() => setDisplayMonth((current) => new Date(current.getFullYear(), current.getMonth() - 1, 1, 12))}
+            >
+              <ChevronLeft aria-hidden="true" />
+            </button>
+            <strong>{displayMonth.toLocaleDateString([], { month: 'long', year: 'numeric' })}</strong>
+            <button
+              type="button"
+              aria-label="Next month"
+              disabled={nextMonthUnavailable}
+              onClick={() => setDisplayMonth((current) => new Date(current.getFullYear(), current.getMonth() + 1, 1, 12))}
+            >
+              <ChevronRight aria-hidden="true" />
+            </button>
+          </div>
+          <div className="usage-calendar-weekdays" aria-hidden="true">
+            {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((weekday, index) => (
+              <span className={index === 0 ? 'closed-day' : ''} key={weekday}>{weekday}</span>
+            ))}
+          </div>
+          <div className="usage-calendar-grid">
+            {calendarDays.map((date) => {
+              const selectedDateKey = dayKey(date);
+              const outsideMonth = date.getMonth() !== displayMonth.getMonth();
+              const sunday = date.getDay() === 0;
+              const unavailable = outsideMonth || sunday || selectedDateKey > latestCompletedDay;
+              return (
+                <button
+                  type="button"
+                  className={`${selectedDateKey === selectedDay ? 'selected ' : ''}${sunday ? 'closed-day ' : ''}${outsideMonth ? 'outside-month' : ''}`}
+                  disabled={unavailable}
+                  aria-label={`${date.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })}${sunday ? ', closed Sunday' : ''}`}
+                  title={sunday ? 'Closed Sunday' : undefined}
+                  key={selectedDateKey}
+                  onClick={() => {
+                    onSelectedDay(selectedDateKey);
+                    detailsRef.current?.removeAttribute('open');
+                  }}
+                >
+                  {date.getDate()}
+                </button>
+              );
+            })}
+          </div>
+          <span className="usage-calendar-note">Sundays are closed and excluded from usage scoring.</span>
+        </div>
+      </details>
+    </div>
+  );
+}
+
 function UsageScorePanel({ score, loading, error, donationDayKey, confirmationBusy, onReviewDaypart, selectedDay, latestCompletedDay, onSelectedDay }: {
   score: ReturnType<typeof buildUsageScore> | null;
   loading: boolean;
@@ -2012,17 +2119,11 @@ function UsageScorePanel({ score, loading, error, donationDayKey, confirmationBu
           <p className="eyebrow">One day at a time · Continuity · Donation reconciliation</p>
           <h2 id="usage-score-title">Daily system usage</h2>
         </div>
-        <label className="compact-control usage-date-control">
-          Usage date
-          <input
-            type="date"
-            value={selectedDay}
-            max={latestCompletedDay}
-            onChange={(event) => {
-              if (event.target.value) onSelectedDay(event.target.value);
-            }}
-          />
-        </label>
+        <UsageDatePicker
+          selectedDay={selectedDay}
+          latestCompletedDay={latestCompletedDay}
+          onSelectedDay={onSelectedDay}
+        />
       </div>
       {error && <div className="error-banner" role="alert">Usage evidence could not sync: {error}</div>}
       {loading ? (

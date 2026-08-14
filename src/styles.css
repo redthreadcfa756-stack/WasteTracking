@@ -1201,6 +1201,94 @@ label,
 }
 .usage-score-heading { align-items: end; }
 .usage-date-control { width: min(220px, 100%); }
+.usage-date-label {
+  display: block;
+  margin-bottom: 0.4rem;
+  color: #554e50;
+  font-size: 0.87rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.usage-date-picker { position: relative; }
+.usage-date-picker > summary {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid #b8cbd6;
+  background: #fff;
+  color: var(--ink);
+  cursor: pointer;
+  list-style: none;
+  font-size: 16px;
+  letter-spacing: normal;
+  text-transform: none;
+}
+.usage-date-picker > summary::-webkit-details-marker { display: none; }
+.usage-date-picker > summary svg { width: 18px; color: var(--red); }
+.usage-date-picker[open] > summary { border-color: var(--red); outline: 3px solid rgba(186, 0, 46, 0.12); }
+.usage-calendar {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 0.45rem);
+  right: 0;
+  width: min(340px, calc(100vw - 2rem));
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.8rem;
+  border: 1px solid #b8cbd6;
+  background: #fff;
+  box-shadow: 0 18px 45px rgba(17, 29, 35, 0.2);
+}
+.usage-calendar-header {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 40px;
+  align-items: center;
+  gap: 0.4rem;
+  text-align: center;
+}
+.usage-calendar-header button {
+  min-height: 40px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--line);
+  background: var(--soft);
+  color: var(--ink);
+}
+.usage-calendar-header button svg { width: 18px; }
+.usage-calendar-weekdays,
+.usage-calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 0.25rem; }
+.usage-calendar-weekdays span {
+  padding-block: 0.2rem;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-align: center;
+  text-transform: uppercase;
+}
+.usage-calendar-weekdays .closed-day { color: #8d9498; }
+.usage-calendar-grid button {
+  min-width: 0;
+  min-height: 40px;
+  padding: 0;
+  border: 1px solid transparent;
+  background: #f4faff;
+  color: var(--ink);
+}
+.usage-calendar-grid button:hover:not(:disabled) { border-color: var(--red); }
+.usage-calendar-grid button.selected { background: var(--red); color: #fff; font-weight: 800; }
+.usage-calendar-grid button.closed-day:disabled {
+  border-color: #d7dde0;
+  background: #e4e7e9;
+  color: #7c858a;
+  opacity: 1;
+}
+.usage-calendar-grid button:disabled:not(.closed-day) { background: #eef1f2; color: #9aa1a5; }
+.usage-calendar-grid button.outside-month { opacity: 0.3; }
+.usage-calendar-note { color: var(--muted); font-size: 0.74rem; line-height: 1.35; }
 
 .usage-review-reminder {
   display: grid;
