@@ -9,6 +9,7 @@ import {
   buildDonationCsv,
   buildTopDonationWasteItems,
   buildProductCaseProjections,
+  buildUsageRangeReport,
   buildUsageScore,
   buildWasteCsv,
   buildWeekdayWasteCosts,
@@ -22,10 +23,12 @@ import {
   donationWindowDayKeys,
   formatDurationInput,
   mergeActivity,
+  nextOperatingDayKey,
   operatingDayCount,
   parseDonationEntry,
   parseDuration,
   pendingQuantityAfterServerUpdate,
+  previousOperatingDayKey,
   quantityAdjustmentFromDrag,
   targetCasesForProduct,
   targetDollarForProduct,
@@ -271,6 +274,66 @@ describe('domain rules', () => {
     expect(launchDay.presenceMeasured).toBe(true);
     expect(launchDay.coverageScore).toBe(0);
     expect(launchDay.score).toBeLessThan(beforeLaunch.score);
+  });
+
+  it('finalizes each usage day with the next operating day donation and skips Sunday', () => {
+    expect(nextOperatingDayKey('2026-08-08')).toBe('2026-08-10');
+    expect(previousOperatingDayKey('2026-08-10')).toBe('2026-08-08');
+    const product = DEFAULT_SETTINGS.products.find((candidate) => candidate.id === 'filets')!;
+    const settings = {
+      ...DEFAULT_SETTINGS,
+      dayparts: [{
+        ...DEFAULT_SETTINGS.dayparts[0],
+        startMinutes: 390,
+        endMinutes: 450,
+      }],
+      donationItems: [{
+        id: 'filet-donation',
+        name: 'Filet',
+        unit: 'lb' as const,
+        sourceProductIds: ['filets'],
+      }],
+    };
+    const saturdayWaste = event({
+      dayKey: '2026-08-08',
+      daypartId: 'breakfast',
+      eventAt: new Date('2026-08-08T07:00:00'),
+    });
+    const mondayBreakfastWaste = event({
+      id: 'monday-breakfast',
+      dayKey: '2026-08-10',
+      daypartId: 'breakfast',
+      eventAt: new Date('2026-08-10T07:00:00'),
+    });
+    const base = {
+      settings,
+      startDayKey: '2026-08-08',
+      endDayKey: '2026-08-08',
+      now: new Date('2026-08-10T12:00:00'),
+      wasteEvents: [saturdayWaste, mondayBreakfastWaste],
+      usageRecords: [],
+    };
+
+    const pending = buildUsageRangeReport({ ...base, donationRecords: [] });
+    expect(pending).toMatchObject({ score: null, scoredDays: 0, pendingDays: 1 });
+    expect(pending.days[0]).toMatchObject({ donationDayKey: '2026-08-10', confidence: 'Awaiting donation' });
+
+    const donationRecord: DonationRecord = {
+      storeId: '00756',
+      dayKey: '2026-08-10',
+      actuals: { 'filet-donation': product.averageWeightLb },
+      predictions: {},
+      units: { 'filet-donation': 'lb' },
+      variance: {},
+      initials: 'CL',
+      submittedAt: new Date(),
+      submittedBy: 'uid',
+      submittedByName: 'Store team',
+      revision: 1,
+    };
+    const finalized = buildUsageRangeReport({ ...base, donationRecords: [donationRecord] });
+    expect(finalized).toMatchObject({ score: 100, scoredDays: 1, pendingDays: 0 });
+    expect(finalized.days[0].score).toBe(100);
   });
 
   it('merges repeated taps by product and minute', () => {

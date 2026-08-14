@@ -44,6 +44,18 @@ export function operatingDayCount(startDayKey: string, endDayKey: string): numbe
   return count;
 }
 
+export function operatingDayKeysInRange(startDayKey: string, endDayKey: string): string[] {
+  const cursor = dateFromDayKey(startDayKey);
+  const end = dateFromDayKey(endDayKey);
+  if (!Number.isFinite(cursor.getTime()) || !Number.isFinite(end.getTime()) || cursor > end) return [];
+  const keys: string[] = [];
+  while (cursor <= end) {
+    if (cursor.getDay() !== 0) keys.push(dayKey(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return keys;
+}
+
 export function wasteExportPresetRange(
   preset: WasteExportPreset,
   endingDayKey: string,
@@ -75,6 +87,20 @@ export function previousDayKey(date = new Date()): string {
   const previous = new Date(date);
   previous.setDate(previous.getDate() - 1);
   return dayKey(previous);
+}
+
+export function previousOperatingDayKey(selectedDayKey: string): string {
+  const previous = dateFromDayKey(selectedDayKey);
+  previous.setDate(previous.getDate() - 1);
+  while (previous.getDay() === 0) previous.setDate(previous.getDate() - 1);
+  return dayKey(previous);
+}
+
+export function nextOperatingDayKey(selectedDayKey: string): string {
+  const next = dateFromDayKey(selectedDayKey);
+  next.setDate(next.getDate() + 1);
+  while (next.getDay() === 0) next.setDate(next.getDate() + 1);
+  return dayKey(next);
 }
 
 export function donationWindowDayKeys(selectedDayKey: string): { current: string; previous: string } {
@@ -323,6 +349,9 @@ export const USAGE_RELIABLE_MINIMUM = 90;
 export const USAGE_CAUTION_MINIMUM = 75;
 export const USAGE_DONATION_TOLERANCE = 0.25;
 export const USAGE_PRESENCE_START_DAY = '2026-08-15';
+export const RELIABLE_USAGE_LABEL = 'Reliable data available';
+export const INSUFFICIENT_USAGE_LABEL = 'Insufficient data for reliable insights';
+export const AWAITING_DONATION_LABEL = 'Awaiting donation';
 
 export type UsageScoreStatus = 'reliable' | 'provisional' | 'caution' | 'unreliable';
 
@@ -424,6 +453,8 @@ export function buildUsageScore({
   now,
   currentWaste,
   previousWaste,
+  donationCurrentWaste,
+  donationPreviousWaste,
   donationRecord,
   usageRecord,
 }: {
@@ -432,12 +463,16 @@ export function buildUsageScore({
   now: Date;
   currentWaste: WasteEvent[];
   previousWaste: WasteEvent[];
+  donationCurrentWaste?: WasteEvent[];
+  donationPreviousWaste?: WasteEvent[];
   donationRecord: DonationRecord | null;
   usageRecord: UsageDayRecord | null;
 }): UsageScoreResult {
   const currentDayKey = dayKey(now);
   const nowMinutes = now.getHours() * 60 + now.getMinutes();
   const presenceMeasured = selectedDayKey >= USAGE_PRESENCE_START_DAY;
+  const reconciliationCurrentWaste = donationCurrentWaste || currentWaste;
+  const reconciliationPreviousWaste = donationPreviousWaste || previousWaste;
   const dayparts = settings.dayparts.flatMap<DaypartUsageScore>((daypart) => {
     const elapsedEnd = selectedDayKey < currentDayKey
       ? daypart.endMinutes
@@ -532,7 +567,12 @@ export function buildUsageScore({
     const comparableItems = settings.donationItems.filter((item) => item.sourceProductIds.length > 0);
     const itemScores = comparableItems.flatMap((item) => {
       const actual = Math.max(0, donationRecord.actuals[item.id] || 0);
-      const tracked = Math.max(0, donationPrediction(item, settings, previousWaste, currentWaste) || 0);
+      const tracked = Math.max(0, donationPrediction(
+        item,
+        settings,
+        reconciliationPreviousWaste,
+        reconciliationCurrentWaste,
+      ) || 0);
       if (actual <= 0) return [];
       const fullCreditAt = actual * (1 - USAGE_DONATION_TOLERANCE);
       const itemScore = fullCreditAt <= 0 ? 100 : Math.min(100, tracked / fullCreditAt * 100);
@@ -585,6 +625,113 @@ export function buildUsageScore({
     donationScore: donationScore === null ? null : Math.round(donationScore),
     dayparts,
     reasons,
+  };
+}
+
+export interface DailyUsageReport {
+  dayKey: string;
+  donationDayKey: string;
+  score: number | null;
+  confidence: typeof RELIABLE_USAGE_LABEL | typeof INSUFFICIENT_USAGE_LABEL | typeof AWAITING_DONATION_LABEL;
+  result: UsageScoreResult | null;
+  reasons: string[];
+}
+
+export interface UsageRangeReport {
+  score: number | null;
+  confidence: DailyUsageReport['confidence'];
+  reportEligible: boolean;
+  scoredDays: number;
+  pendingDays: number;
+  totalDays: number;
+  days: DailyUsageReport[];
+}
+
+export function buildUsageRangeReport({
+  settings,
+  startDayKey,
+  endDayKey,
+  now,
+  wasteEvents,
+  donationRecords,
+  usageRecords,
+}: {
+  settings: AppSettings;
+  startDayKey: string;
+  endDayKey: string;
+  now: Date;
+  wasteEvents: WasteEvent[];
+  donationRecords: DonationRecord[];
+  usageRecords: UsageDayRecord[];
+}): UsageRangeReport {
+  const wasteByDay = new Map<string, WasteEvent[]>();
+  wasteEvents.forEach((event) => {
+    const dayEvents = wasteByDay.get(event.dayKey) || [];
+    dayEvents.push(event);
+    wasteByDay.set(event.dayKey, dayEvents);
+  });
+  const donationByDay = new Map(donationRecords.map((record) => [record.dayKey, record]));
+  const usageByDay = new Map(usageRecords.map((record) => [record.dayKey, record]));
+
+  const days = operatingDayKeysInRange(startDayKey, endDayKey).map<DailyUsageReport>((selectedDayKey) => {
+    const donationDayKey = nextOperatingDayKey(selectedDayKey);
+    const donationRecord = donationByDay.get(donationDayKey) || null;
+    if (!donationRecord) {
+      return {
+        dayKey: selectedDayKey,
+        donationDayKey,
+        score: null,
+        confidence: AWAITING_DONATION_LABEL,
+        result: null,
+        reasons: [`Awaiting the ${donationDayKey} donation submission`],
+      };
+    }
+
+    const selectedDayWaste = wasteByDay.get(selectedDayKey) || [];
+    const donationDayWaste = wasteByDay.get(donationDayKey) || [];
+    const result = buildUsageScore({
+      settings,
+      selectedDayKey,
+      now,
+      currentWaste: selectedDayWaste,
+      previousWaste: selectedDayWaste,
+      donationPreviousWaste: selectedDayWaste,
+      donationCurrentWaste: donationDayWaste,
+      donationRecord,
+      usageRecord: usageByDay.get(selectedDayKey) || null,
+    });
+    return {
+      dayKey: selectedDayKey,
+      donationDayKey,
+      score: result.score,
+      confidence: result.reportEligible ? RELIABLE_USAGE_LABEL : INSUFFICIENT_USAGE_LABEL,
+      result,
+      reasons: result.reasons,
+    };
+  });
+
+  const finalizedDays = days.filter((day): day is DailyUsageReport & { score: number; result: UsageScoreResult } => (
+    day.score !== null && day.result !== null
+  ));
+  const pendingDays = days.length - finalizedDays.length;
+  const score = finalizedDays.length
+    ? Math.round(finalizedDays.reduce((total, day) => total + day.score, 0) / finalizedDays.length)
+    : null;
+  const reportEligible = finalizedDays.length > 0
+    && pendingDays === 0
+    && finalizedDays.every((day) => day.result.reportEligible);
+  const confidence = score === null
+    ? AWAITING_DONATION_LABEL
+    : reportEligible ? RELIABLE_USAGE_LABEL : INSUFFICIENT_USAGE_LABEL;
+
+  return {
+    score,
+    confidence,
+    reportEligible,
+    scoredDays: finalizedDays.length,
+    pendingDays,
+    totalDays: days.length,
+    days,
   };
 }
 

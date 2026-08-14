@@ -1,7 +1,7 @@
 import ExcelJS from 'exceljs';
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS } from './defaults';
-import { buildWasteTrend } from './domain';
+import { buildUsageRangeReport, buildWasteTrend } from './domain';
 import { createWasteTrendWorkbook } from './exportWorkbook';
 import type { WasteEvent } from './types';
 
@@ -55,6 +55,15 @@ describe('cool down workbook', () => {
       endDayKey: '2026-08-10',
       source: 'live',
       metric: 'quantity',
+      usageReport: buildUsageRangeReport({
+        settings,
+        startDayKey: '2026-08-01',
+        endDayKey: '2026-08-10',
+        now: new Date('2026-08-11T12:00:00'),
+        wasteEvents: events,
+        donationRecords: [],
+        usageRecords: [],
+      }),
     });
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(buffer);
@@ -99,5 +108,19 @@ describe('cool down workbook', () => {
     expect(matrix?.getCell(projectionRow, filetColumn).value).toBeCloseTo(0.075);
     expect(matrix?.getCell(projectionRow + 1, filetColumn).value).toBeCloseTo(0.45);
     expect(matrix?.getCell(projectionRow + 2, filetColumn).value).toBeCloseTo(1.95);
+
+    const usage = workbook.getWorksheet('Usage Confidence');
+    expect(usage?.getRow(6).values).toEqual([
+      undefined,
+      'Usage Date',
+      'Finalizing Donation Date',
+      'Usage Score',
+      'Confidence',
+      'Presence',
+      'Continuity',
+      'Donation Reconciliation',
+      'Notes',
+    ]);
+    expect(usage?.getCell('D7').value).toBe('Awaiting donation');
   });
 });

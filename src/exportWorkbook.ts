@@ -4,6 +4,7 @@ import {
   buildDaypartTopWasteItems,
   buildProductCaseProjections,
   buildWeekdayWasteCosts,
+  type UsageRangeReport,
   type WasteExportGrouping,
   type WasteTrendBucket,
 } from './domain';
@@ -13,6 +14,74 @@ const DARK = 'FF111D23';
 const PALE_BLUE = 'FFF4FAFF';
 const YELLOW = 'FFFFEB3B';
 const WHITE = 'FFFFFFFF';
+
+function addUsageWorksheet(
+  workbook: ExcelJS.Workbook,
+  report: UsageRangeReport,
+  startDayKey: string,
+  endDayKey: string,
+) {
+  const sheet = workbook.addWorksheet('Usage Confidence', {
+    views: [{ state: 'frozen', ySplit: 6, showGridLines: false }],
+  });
+  applyTitle(sheet, 8, 'System Usage and Confidence');
+  sheet.getRow(2).values = ['Date range', startDayKey, endDayKey];
+  sheet.getRow(3).values = [
+    'Range usage score',
+    report.score === null ? 'Awaiting donation' : report.score,
+    'Confidence',
+    report.confidence,
+  ];
+  if (typeof sheet.getCell('B3').value === 'number') sheet.getCell('B3').numFmt = '0';
+  sheet.getRow(4).values = [
+    'Coverage',
+    `${report.scoredDays} of ${report.totalDays} operating days scored`,
+    'Awaiting donation',
+    report.pendingDays,
+  ];
+  sheet.getRow(6).values = [
+    'Usage Date',
+    'Finalizing Donation Date',
+    'Usage Score',
+    'Confidence',
+    'Presence',
+    'Continuity',
+    'Donation Reconciliation',
+    'Notes',
+  ];
+  applyHeader(sheet.getRow(6));
+
+  report.days.forEach((day, index) => {
+    const rowNumber = index + 7;
+    const row = sheet.getRow(rowNumber);
+    sheet.getCell(rowNumber, 1).value = new Date(`${day.dayKey}T12:00:00`);
+    sheet.getCell(rowNumber, 2).value = new Date(`${day.donationDayKey}T12:00:00`);
+    sheet.getCell(rowNumber, 1).numFmt = 'm-d-yy';
+    sheet.getCell(rowNumber, 2).numFmt = 'm-d-yy';
+    sheet.getCell(rowNumber, 3).value = day.score;
+    sheet.getCell(rowNumber, 4).value = day.confidence;
+    sheet.getCell(rowNumber, 5).value = !day.result
+      ? 'Awaiting donation'
+      : day.result.coverageScore === null ? 'Not measured' : day.result.coverageScore / 100;
+    sheet.getCell(rowNumber, 6).value = day.result ? day.result.continuityScore / 100 : null;
+    sheet.getCell(rowNumber, 7).value = day.result?.donationScore === null || !day.result
+      ? null
+      : day.result.donationScore / 100;
+    sheet.getCell(rowNumber, 8).value = day.reasons.join('; ');
+    [5, 6, 7].forEach((column) => {
+      if (typeof sheet.getCell(rowNumber, column).value === 'number') {
+        sheet.getCell(rowNumber, column).numFmt = '0%';
+      }
+    });
+    sheet.getCell(rowNumber, 8).alignment = { wrapText: true, vertical: 'top' };
+    if (index % 2 === 1) row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: PALE_BLUE } };
+  });
+
+  sheet.autoFilter = { from: 'A6', to: `H${Math.max(6, report.days.length + 6)}` };
+  [14, 24, 14, 38, 16, 16, 24, 70].forEach((width, index) => {
+    sheet.getColumn(index + 1).width = width;
+  });
+}
 
 function applyTitle(sheet: ExcelJS.Worksheet, lastColumn: number, title: string) {
   sheet.mergeCells(1, 1, 1, lastColumn);
@@ -67,12 +136,14 @@ export async function createDonationWorkbook({
   settings,
   startDayKey,
   endDayKey,
+  usageReport,
 }: {
   records: DonationRecord[];
   settings: AppSettings;
   startDayKey: string;
   endDayKey: string;
   source: 'live' | 'demo';
+  usageReport: UsageRangeReport;
 }): Promise<ArrayBuffer> {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'CoolDownTracker';
@@ -131,6 +202,8 @@ export async function createDonationWorkbook({
   sheet.getColumn(3).width = 25;
   sheet.getColumn(3).alignment = { horizontal: 'right' };
 
+  addUsageWorksheet(workbook, usageReport, startDayKey, endDayKey);
+
   const buffer = await workbook.xlsx.writeBuffer();
   return buffer as unknown as ArrayBuffer;
 }
@@ -144,6 +217,7 @@ export async function createWasteTrendWorkbook({
   endDayKey,
   source,
   metric,
+  usageReport,
 }: {
   events: WasteEvent[];
   trend: WasteTrendBucket[];
@@ -153,6 +227,7 @@ export async function createWasteTrendWorkbook({
   endDayKey: string;
   source: 'live' | 'demo';
   metric: 'cost' | 'quantity';
+  usageReport: UsageRangeReport;
 }): Promise<ArrayBuffer> {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'CoolDownTracker';
@@ -341,6 +416,8 @@ export async function createWasteTrendWorkbook({
   for (let column = 2; column <= lastColumn; column += 1) matrix.getColumn(column).width = 18;
   matrix.getRow(4).height = 58;
   matrix.getCell('B4').alignment = { wrapText: true, vertical: 'middle' };
+
+  addUsageWorksheet(workbook, usageReport, startDayKey, endDayKey);
 
   const buffer = await workbook.xlsx.writeBuffer();
   return buffer as unknown as ArrayBuffer;

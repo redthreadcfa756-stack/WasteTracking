@@ -35,6 +35,7 @@ import {
   loadDonationRecordsForDateRange,
   loadDemoDonationRecordsForDateRange,
   loadDemoWasteForDateRange,
+  loadUsageDaysForDateRange,
   loadWasteForDateRange,
   login,
   logout,
@@ -55,6 +56,7 @@ import { COOLDOWN_PANS, DEFAULT_SETTINGS } from './defaults';
 import {
   buildDaypartTopWasteItemsFromDailySummaries,
   buildTopDonationWasteItems,
+  buildUsageRangeReport,
   buildUsageScore,
   completedEmptyDaypartsNeedingReview,
   daypartWaste,
@@ -77,6 +79,10 @@ import {
   quantityAdjustmentFromDrag,
   isOperatingDayKey,
   operatingDayCount,
+  nextOperatingDayKey,
+  previousOperatingDayKey,
+  RELIABLE_USAGE_LABEL,
+  INSUFFICIENT_USAGE_LABEL,
   targetCasesForProduct,
   targetDollarForProduct,
   USAGE_PRESENCE_START_DAY,
@@ -87,7 +93,7 @@ import {
 } from './domain';
 import { createDonationWorkbook, createWasteTrendWorkbook } from './exportWorkbook';
 import { firebaseConfigured } from './firebase';
-import { useAuthUser, useDeviceName, useDonationDayData, useMember, useNow, useOnlineStatus, useStoreData, useUsageData, useUsageDayRecord } from './hooks';
+import { useAuthUser, useDeviceName, useDonationDayData, useMember, useNow, useOnlineStatus, useStoreData, useUsageData, useUsageDayRecord, useUsageRangeData } from './hooks';
 import type {
   AppSettings,
   CooldownTimer,
@@ -1870,23 +1876,37 @@ function UsageTab({ settings, currentDay, now, member, deviceName, notify }: {
   deviceName: string;
   notify: (message: string) => void;
 }) {
-  const [selectedDay, setSelectedDay] = useState(currentDay);
+  const latestCompletedDay = previousOperatingDayKey(currentDay);
+  const monthStartDay = dayKey(new Date(now.getFullYear(), now.getMonth(), 1, 12));
+  const [selectedDay, setSelectedDay] = useState(latestCompletedDay);
   const usageData = useUsageData(member.storeId, selectedDay);
+  const monthToDateData = useUsageRangeData(member.storeId, monthStartDay, latestCompletedDay);
   const [outcomeBusy, setOutcomeBusy] = useState<DaypartId | null>(null);
   const [reviewDaypart, setReviewDaypart] = useState<DaypartId | null>(null);
   const recordUsageOutcome = useUsageOutcomeRecorder({ member, currentDay: selectedDay, deviceName, notify });
 
-  useEffect(() => setSelectedDay(currentDay), [currentDay]);
+  useEffect(() => setSelectedDay(latestCompletedDay), [latestCompletedDay]);
 
-  const usageScore = useMemo(() => buildUsageScore({
+  const usageScore = useMemo(() => usageData.donationRecord ? buildUsageScore({
     settings,
     selectedDayKey: selectedDay,
     now,
     currentWaste: usageData.currentWaste,
-    previousWaste: usageData.previousWaste,
+    previousWaste: usageData.currentWaste,
+    donationPreviousWaste: usageData.currentWaste,
+    donationCurrentWaste: usageData.donationDayWaste,
     donationRecord: usageData.donationRecord,
     usageRecord: usageData.record,
-  }), [now, selectedDay, settings, usageData.currentWaste, usageData.donationRecord, usageData.previousWaste, usageData.record]);
+  }) : null, [now, selectedDay, settings, usageData.currentWaste, usageData.donationDayWaste, usageData.donationRecord, usageData.record]);
+  const monthToDateUsage = useMemo(() => buildUsageRangeReport({
+    settings,
+    startDayKey: monthStartDay,
+    endDayKey: latestCompletedDay,
+    now,
+    wasteEvents: monthToDateData.wasteEvents,
+    donationRecords: monthToDateData.donationRecords,
+    usageRecords: monthToDateData.usageRecords,
+  }), [latestCompletedDay, monthStartDay, monthToDateData.donationRecords, monthToDateData.usageRecords, monthToDateData.wasteEvents, now, settings]);
 
   const saveDaypartUsageOutcome = async (daypartId: DaypartId, outcome: DaypartUsageOutcome) => {
     setOutcomeBusy(daypartId);
@@ -1897,15 +1917,22 @@ function UsageTab({ settings, currentDay, now, member, deviceName, notify }: {
 
   return (
     <section className="panel-stack">
+      <MonthToDateUsagePanel
+        report={monthToDateUsage}
+        loading={monthToDateData.loading}
+        error={monthToDateData.error}
+        monthLabel={new Date(`${monthStartDay}T12:00:00`).toLocaleDateString([], { month: 'long', year: 'numeric' })}
+      />
       <UsageScorePanel
         score={usageScore}
         loading={usageData.loading}
         error={usageData.error}
+        donationDayKey={usageData.donationDayKey}
         confirmationBusy={outcomeBusy}
         onReviewDaypart={setReviewDaypart}
         selectedDay={selectedDay}
-        currentDay={currentDay}
-        onSelectedDay={setSelectedDay}
+        latestCompletedDay={latestCompletedDay}
+        onSelectedDay={(day) => setSelectedDay(isOperatingDayKey(day) ? day : previousOperatingDayKey(day))}
       />
       {reviewDaypart && (
         <DaypartUsageReview
@@ -1921,21 +1948,60 @@ function UsageTab({ settings, currentDay, now, member, deviceName, notify }: {
   );
 }
 
-function UsageScorePanel({ score, loading, error, confirmationBusy, onReviewDaypart, selectedDay, currentDay, onSelectedDay }: {
-  score: ReturnType<typeof buildUsageScore>;
+function MonthToDateUsagePanel({ report, loading, error, monthLabel }: {
+  report: ReturnType<typeof buildUsageRangeReport>;
   loading: boolean;
   error: string;
+  monthLabel: string;
+}) {
+  const status = report.reportEligible ? 'reliable' : report.score === null ? 'provisional' : 'unreliable';
+  return (
+    <section className="usage-score-section" aria-labelledby="mtd-usage-title">
+      <div className="section-heading">
+        <div>
+          <p className="eyebrow">{monthLabel} · Completed operating days only</p>
+          <h2 id="mtd-usage-title">Month-to-date usage</h2>
+        </div>
+      </div>
+      {error && <div className="error-banner" role="alert">Month-to-date usage could not sync: {error}</div>}
+      {loading ? (
+        <EmptyState>Loading month-to-date usage…</EmptyState>
+      ) : (
+        <div className={`usage-score-hero status-${status}`}>
+          <div className="usage-score-number">
+            <strong>{report.score === null ? '—' : report.score}</strong>
+            <span>/ 100</span>
+          </div>
+          <div>
+            <strong>Running MTD average</strong>
+            <span>{report.scoredDays} scored day{report.scoredDays === 1 ? '' : 's'} · {report.pendingDays} awaiting donation</span>
+          </div>
+          <span className="usage-eligibility-badge">
+            {report.reportEligible ? <Check aria-hidden="true" /> : <AlertTriangle aria-hidden="true" />}
+            {report.confidence}
+          </span>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function UsageScorePanel({ score, loading, error, donationDayKey, confirmationBusy, onReviewDaypart, selectedDay, latestCompletedDay, onSelectedDay }: {
+  score: ReturnType<typeof buildUsageScore> | null;
+  loading: boolean;
+  error: string;
+  donationDayKey: string;
   confirmationBusy: DaypartId | null;
   onReviewDaypart: (daypartId: DaypartId) => void;
   selectedDay: string;
-  currentDay: string;
+  latestCompletedDay: string;
   onSelectedDay: (selectedDay: string) => void;
 }) {
-  const statusLabel = score.status === 'reliable'
+  const statusLabel = score?.status === 'reliable'
     ? 'Reliable for reporting'
-    : score.status === 'provisional'
+    : score?.status === 'provisional'
       ? 'Provisional · donation pending'
-      : score.status === 'caution'
+      : score?.status === 'caution'
         ? 'Caution · potentially incomplete'
         : 'Unreliable · exclude from trends';
 
@@ -1951,7 +2017,7 @@ function UsageScorePanel({ score, loading, error, confirmationBusy, onReviewDayp
           <input
             type="date"
             value={selectedDay}
-            max={currentDay}
+            max={latestCompletedDay}
             onChange={(event) => {
               if (event.target.value) onSelectedDay(event.target.value);
             }}
@@ -1961,6 +2027,14 @@ function UsageScorePanel({ score, loading, error, confirmationBusy, onReviewDayp
       {error && <div className="error-banner" role="alert">Usage evidence could not sync: {error}</div>}
       {loading ? (
         <EmptyState>Loading system usage evidence…</EmptyState>
+      ) : !score ? (
+        <EmptyState>
+          Awaiting the {new Date(`${donationDayKey}T12:00:00`).toLocaleDateString([], {
+            weekday: 'long',
+            month: 'short',
+            day: 'numeric',
+          })} donation submission. No usage result is shown until that count is saved.
+        </EmptyState>
       ) : (
         <>
           <div className={`usage-score-hero status-${score.status}`}>
@@ -1974,7 +2048,7 @@ function UsageScorePanel({ score, loading, error, confirmationBusy, onReviewDayp
             </div>
             <span className="usage-eligibility-badge">
               {score.reportEligible ? <Check aria-hidden="true" /> : <AlertTriangle aria-hidden="true" />}
-              {score.reportEligible ? 'Reliable data available' : 'Insufficient data for reliable insights'}
+              {score.reportEligible ? RELIABLE_USAGE_LABEL : INSUFFICIENT_USAGE_LABEL}
             </span>
           </div>
 
@@ -2026,7 +2100,7 @@ function UsageScorePanel({ score, loading, error, confirmationBusy, onReviewDayp
           <details className="usage-score-details">
             <summary>Why this score?</summary>
             <ul>{score.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
-            <p>Donation reconciliation compares today’s breakfast and the previous day’s lunch–dinner Cool Down activity with today’s donation record. Direct discard is intentionally excluded.</p>
+            <p>This day is finalized by the next operating day’s donation submission. Saturday is finalized Monday because Sunday is excluded. Direct discard is intentionally excluded.</p>
           </details>
         </>
       )}
@@ -2737,6 +2811,30 @@ function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDay
     return Math.round((end - start) / 86_400_000) + 1;
   };
 
+  const loadUsageReportForExport = async () => {
+    const extendedEndDay = nextOperatingDayKey(exportEndDate);
+    const [wasteEvents, donationRecords, usageRecords] = await Promise.all([
+      exportSource === 'demo'
+        ? loadDemoWasteForDateRange(storeId, exportStartDate, extendedEndDay)
+        : loadWasteForDateRange(storeId, exportStartDate, extendedEndDay),
+      exportSource === 'demo'
+        ? loadDemoDonationRecordsForDateRange(storeId, exportStartDate, extendedEndDay)
+        : loadDonationRecordsForDateRange(storeId, exportStartDate, extendedEndDay),
+      exportSource === 'demo'
+        ? Promise.resolve([])
+        : loadUsageDaysForDateRange(storeId, exportStartDate, exportEndDate),
+    ]);
+    return buildUsageRangeReport({
+      settings: draft,
+      startDayKey: exportStartDate,
+      endDayKey: exportEndDate,
+      now: new Date(),
+      wasteEvents,
+      donationRecords,
+      usageRecords,
+    });
+  };
+
   const exportWaste = async () => {
     setExporting(true);
     try {
@@ -2754,6 +2852,7 @@ function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDay
         return;
       }
       const trend = buildWasteTrend(events, draft, exportGrouping);
+      const usageReport = await loadUsageReportForExport();
       const workbook = await createWasteTrendWorkbook({
         events,
         trend,
@@ -2763,6 +2862,7 @@ function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDay
         endDayKey: exportEndDate,
         source: exportSource,
         metric: exportMetric,
+        usageReport,
       });
       const url = URL.createObjectURL(new Blob([workbook], {
         type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -2801,12 +2901,14 @@ function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDay
         notify(`No submitted donation data was found from ${exportStartDate} through ${exportEndDate}.`);
         return;
       }
+      const usageReport = await loadUsageReportForExport();
       const workbook = await createDonationWorkbook({
         records,
         settings: draft,
         startDayKey: exportStartDate,
         endDayKey: exportEndDate,
         source: exportSource,
+        usageReport,
       });
       const url = URL.createObjectURL(new Blob([workbook], {
         type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -3107,7 +3209,7 @@ function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDay
         <summary>Export reports</summary>
         <div className="export-panel">
         <div>
-          <p>Download cool down trends or submitted donation totals and averages for the selected range.</p>
+          <p>Download cool down trends or submitted donation totals for the selected range. Every workbook includes daily usage scores and confidence.</p>
         </div>
         <label>
           Starting date

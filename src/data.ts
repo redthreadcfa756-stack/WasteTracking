@@ -29,7 +29,7 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore';
 import { auth, db } from './firebase';
-import { adjustCooldownProductQuantities, buildDailyWasteSummary, isOperatingDayKey } from './domain';
+import { adjustCooldownProductQuantities, buildDailyWasteSummary, isOperatingDayKey, operatingDayKeysInRange } from './domain';
 import type { AppSettings, CooldownPanId, CooldownTimer, DailyWasteSummary, DaypartId, DaypartUsageOutcome, DiscardEvent, DonationRecord, MemberProfile, SosEntry, UsageDayRecord, WasteEvent } from './types';
 
 function requireFirebase() {
@@ -116,6 +116,24 @@ export function subscribeUsageDay(
   }, onError);
 }
 
+export function subscribeUsageDaysForDateRange(
+  storeId: string,
+  startDayKey: string,
+  endDayKey: string,
+  callback: (records: UsageDayRecord[]) => void,
+  onError: (error: FirestoreError) => void,
+): Unsubscribe {
+  const services = requireFirebase();
+  const recordsQuery = query(
+    collection(services.db, 'stores', storeId, 'usageDays'),
+    where('dayKey', '>=', startDayKey),
+    where('dayKey', '<=', endDayKey),
+  );
+  return onSnapshot(recordsQuery, { includeMetadataChanges: true }, (snapshot) => {
+    callback(snapshot.docs.map((recordDoc) => recordDoc.data() as UsageDayRecord));
+  }, onError);
+}
+
 export async function recordUsageHeartbeat({
   storeId,
   selectedDayKey,
@@ -190,6 +208,24 @@ export function subscribeWasteForDay(
   }, onError);
 }
 
+export function subscribeWasteForDateRange(
+  storeId: string,
+  startDayKey: string,
+  endDayKey: string,
+  callback: (events: WasteEvent[]) => void,
+  onError: (error: FirestoreError) => void,
+): Unsubscribe {
+  const services = requireFirebase();
+  const eventsQuery = query(
+    collection(services.db, 'stores', storeId, 'wasteEvents'),
+    where('dayKey', '>=', startDayKey),
+    where('dayKey', '<=', endDayKey),
+  );
+  return onSnapshot(eventsQuery, { includeMetadataChanges: true }, (snapshot) => {
+    callback(snapshot.docs.map((eventDoc) => ({ id: eventDoc.id, ...eventDoc.data() } as WasteEvent)));
+  }, onError);
+}
+
 export function subscribeDailyWasteSummaries(
   storeId: string,
   startDayKey: string,
@@ -206,23 +242,6 @@ export function subscribeDailyWasteSummaries(
   return onSnapshot(summariesQuery, { includeMetadataChanges: true }, (snapshot) => {
     callback(snapshot.docs.map((summaryDoc) => summaryDoc.data() as DailyWasteSummary));
   }, onError);
-}
-
-function operatingDayKeysInRange(startDayKey: string, endDayKey: string): string[] {
-  if (startDayKey > endDayKey) return [];
-  const cursor = new Date(`${startDayKey}T12:00:00`);
-  const end = new Date(`${endDayKey}T12:00:00`);
-  const result: string[] = [];
-  while (cursor <= end) {
-    const selectedDayKey = [
-      cursor.getFullYear(),
-      String(cursor.getMonth() + 1).padStart(2, '0'),
-      String(cursor.getDate()).padStart(2, '0'),
-    ].join('-');
-    if (isOperatingDayKey(selectedDayKey)) result.push(selectedDayKey);
-    cursor.setDate(cursor.getDate() + 1);
-  }
-  return result;
 }
 
 export async function ensureDailyWasteSummaries(
@@ -404,6 +423,20 @@ export async function loadWasteForDateRange(storeId: string, startDayKey: string
     where('dayKey', '<=', endDayKey),
   ));
   return snapshot.docs.map((eventDoc) => ({ id: eventDoc.id, ...eventDoc.data() } as WasteEvent));
+}
+
+export async function loadUsageDaysForDateRange(
+  storeId: string,
+  startDayKey: string,
+  endDayKey: string,
+): Promise<UsageDayRecord[]> {
+  const services = requireFirebase();
+  const snapshot = await getDocs(query(
+    collection(services.db, 'stores', storeId, 'usageDays'),
+    where('dayKey', '>=', startDayKey),
+    where('dayKey', '<=', endDayKey),
+  ));
+  return snapshot.docs.map((recordDoc) => recordDoc.data() as UsageDayRecord);
 }
 
 export async function loadDemoWasteForDateRange(storeId: string, startDayKey: string, endDayKey: string): Promise<WasteEvent[]> {
