@@ -2198,8 +2198,34 @@ function UsageScorePanel({ score, loading, error, donationDayKey, confirmationBu
             ))}
           </div>
 
-          <details className="usage-score-details">
-            <summary>Why this score?</summary>
+          <details className="usage-score-details" open={score.reportEligible}>
+            <summary>Why this score? · Tracked vs donated</summary>
+            {score.donationComparisons.length > 0 && (
+              <div className="usage-donation-comparisons">
+                {score.donationComparisons.map((comparison) => {
+                  const difference = comparison.trackedAmount - comparison.donatedAmount;
+                  const exactMatch = Math.abs(difference) < 0.005;
+                  return (
+                    <div className="usage-donation-comparison" key={comparison.itemId}>
+                      <div>
+                        <strong>{comparison.itemName}</strong>
+                        <span>
+                          {formatQuantity(comparison.trackedAmount)} tracked / {formatQuantity(comparison.donatedAmount)} donated {comparison.unit}
+                        </span>
+                      </div>
+                      <div>
+                        <strong className={comparison.scoreContribution >= 99.5 ? 'meets-threshold' : 'below-threshold'}>
+                          {Math.round(comparison.trackedPercent)}%
+                        </strong>
+                        <span>{exactMatch
+                          ? 'Exact match'
+                          : `${formatQuantity(Math.abs(difference))} ${comparison.unit} ${difference > 0 ? 'over' : 'under'}`}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
             <ul>{score.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
             <p>This day is finalized by the next operating day’s donation submission. Saturday is finalized Monday because Sunday is excluded. Direct discard is intentionally excluded.</p>
           </details>

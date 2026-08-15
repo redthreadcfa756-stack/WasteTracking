@@ -334,6 +334,12 @@ describe('domain rules', () => {
     const finalized = buildUsageRangeReport({ ...base, donationRecords: [donationRecord] });
     expect(finalized).toMatchObject({ score: 100, scoredDays: 1, pendingDays: 0 });
     expect(finalized.days[0].score).toBe(100);
+    expect(finalized.days[0].result?.donationComparisons[0]).toMatchObject({
+      itemName: 'Filet',
+      trackedAmount: product.averageWeightLb,
+      donatedAmount: product.averageWeightLb,
+      trackedPercent: 100,
+    });
   });
 
   it('merges repeated taps by product and minute', () => {

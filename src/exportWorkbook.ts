@@ -24,7 +24,7 @@ function addUsageWorksheet(
   const sheet = workbook.addWorksheet('Usage Confidence', {
     views: [{ state: 'frozen', ySplit: 6, showGridLines: false }],
   });
-  applyTitle(sheet, 8, 'System Usage and Confidence');
+  applyTitle(sheet, 9, 'System Usage and Confidence');
   sheet.getRow(2).values = ['Date range', startDayKey, endDayKey];
   sheet.getRow(3).values = [
     'Range usage score',
@@ -47,6 +47,7 @@ function addUsageWorksheet(
     'Presence',
     'Continuity',
     'Donation Reconciliation',
+    'Tracked vs Donated',
     'Notes',
   ];
   applyHeader(sheet.getRow(6));
@@ -67,18 +68,22 @@ function addUsageWorksheet(
     sheet.getCell(rowNumber, 7).value = day.result?.donationScore === null || !day.result
       ? null
       : day.result.donationScore / 100;
-    sheet.getCell(rowNumber, 8).value = day.reasons.join('; ');
+    sheet.getCell(rowNumber, 8).value = day.result?.donationComparisons.map((comparison) => (
+      `${comparison.itemName}: ${comparison.trackedAmount.toFixed(2)} tracked / ${comparison.donatedAmount.toFixed(2)} donated ${comparison.unit} (${Math.round(comparison.trackedPercent)}%)`
+    )).join('; ') || '—';
+    sheet.getCell(rowNumber, 9).value = day.reasons.join('; ');
     [5, 6, 7].forEach((column) => {
       if (typeof sheet.getCell(rowNumber, column).value === 'number') {
         sheet.getCell(rowNumber, column).numFmt = '0%';
       }
     });
     sheet.getCell(rowNumber, 8).alignment = { wrapText: true, vertical: 'top' };
+    sheet.getCell(rowNumber, 9).alignment = { wrapText: true, vertical: 'top' };
     if (index % 2 === 1) row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: PALE_BLUE } };
   });
 
-  sheet.autoFilter = { from: 'A6', to: `H${Math.max(6, report.days.length + 6)}` };
-  [14, 24, 14, 38, 16, 16, 24, 70].forEach((width, index) => {
+  sheet.autoFilter = { from: 'A6', to: `I${Math.max(6, report.days.length + 6)}` };
+  [14, 24, 14, 38, 16, 16, 24, 70, 70].forEach((width, index) => {
     sheet.getColumn(index + 1).width = width;
   });
 }

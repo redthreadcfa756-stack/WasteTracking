@@ -383,8 +383,19 @@ export interface UsageScoreResult {
   presenceMeasured: boolean;
   continuityScore: number;
   donationScore: number | null;
+  donationComparisons: DonationUsageComparison[];
   dayparts: DaypartUsageScore[];
   reasons: string[];
+}
+
+export interface DonationUsageComparison {
+  itemId: string;
+  itemName: string;
+  unit: DonationItemConfig['unit'];
+  trackedAmount: number;
+  donatedAmount: number;
+  trackedPercent: number;
+  scoreContribution: number;
 }
 
 export function usagePresenceSlotKey(daypartId: DaypartId, startMinutes: number): string {
@@ -563,6 +574,7 @@ export function buildUsageScore({
 
   let donationScore: number | null = null;
   const donationReasons: string[] = [];
+  const donationComparisons: DonationUsageComparison[] = [];
   if (donationRecord) {
     const comparableItems = settings.donationItems.filter((item) => item.sourceProductIds.length > 0);
     const itemScores = comparableItems.flatMap((item) => {
@@ -576,6 +588,15 @@ export function buildUsageScore({
       if (actual <= 0) return [];
       const fullCreditAt = actual * (1 - USAGE_DONATION_TOLERANCE);
       const itemScore = fullCreditAt <= 0 ? 100 : Math.min(100, tracked / fullCreditAt * 100);
+      donationComparisons.push({
+        itemId: item.id,
+        itemName: item.name,
+        unit: item.unit,
+        trackedAmount: tracked,
+        donatedAmount: actual,
+        trackedPercent: tracked / actual * 100,
+        scoreContribution: itemScore,
+      });
       if (itemScore < 99.5) {
         donationReasons.push(`${item.name}: tracked ${formatQuantity(tracked)} vs donated ${formatQuantity(actual)}`);
       }
@@ -623,6 +644,7 @@ export function buildUsageScore({
     presenceMeasured,
     continuityScore: Math.round(continuityScore),
     donationScore: donationScore === null ? null : Math.round(donationScore),
+    donationComparisons,
     dayparts,
     reasons,
   };

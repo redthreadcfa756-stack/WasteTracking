@@ -119,6 +119,7 @@ describe('cool down workbook', () => {
       'Presence',
       'Continuity',
       'Donation Reconciliation',
+      'Tracked vs Donated',
       'Notes',
     ]);
     expect(usage?.getCell('D7').value).toBe('Awaiting donation');
