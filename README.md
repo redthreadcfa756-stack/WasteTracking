@@ -74,7 +74,7 @@ Pan announcements use loudness-normalized bundled recordings so every device hea
 
 Donation weights use calculator-style entry so typed digits fill from right to left (`1`, `2`, `3` becomes `1.23 lb`) without manually selecting the decimal value.
 
-The Donations tab presents count entry without user-facing prediction amounts. A date selector supports prior dates; revising a submitted date allows corrections to its saved amounts, accepts newly added amounts separately, and calculates the updated totals automatically.
+The Donations tab presents count entry without user-facing prediction amounts. A date selector supports prior dates; revising a submitted date allows corrections to its saved amounts, accepts newly added amounts separately, and calculates the updated totals automatically. Before saving, Cool Down-linked products entered as zero must be explicitly reviewed and confirmed. A donation submission with four or more linked products at zero is preserved for correction but classified as a failed donation count; it receives no donation-reconciliation credit and cannot make its associated usage day reliable.
 
 Cool down exports support selected-day, week-to-date, previous-week, month-to-date, rolling-range, and custom date options. Business weeks run Monday through Saturday, and Sundays are excluded from cool down export data and operating-day calculations.
 

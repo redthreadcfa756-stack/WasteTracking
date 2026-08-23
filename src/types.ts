@@ -134,6 +134,7 @@ export interface DonationRecord {
   storeId: string;
   dayKey: string;
   actuals: Record<string, number>;
+  confirmedZeroItemIds?: string[];
   predictions: Record<string, number | null>;
   units: Record<string, DonationUnit>;
   variance: Record<string, number | null>;

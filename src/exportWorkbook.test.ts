@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS } from './defaults';
 import { buildUsageRangeReport, buildWasteTrend } from './domain';
 import { createWasteTrendWorkbook } from './exportWorkbook';
-import type { WasteEvent } from './types';
+import type { DonationRecord, WasteEvent } from './types';
 
 const wasteEvent = (overrides: Partial<WasteEvent>): WasteEvent => ({
   id: 'event',
@@ -123,5 +123,58 @@ describe('cool down workbook', () => {
       'Notes',
     ]);
     expect(usage?.getCell('D7').value).toBe('Awaiting donation');
+  });
+
+  it('labels failed donation counts in the usage worksheet', async () => {
+    const donationItems = Array.from({ length: 4 }, (_, index) => ({
+      id: `filet-donation-${index + 1}`,
+      name: `Filet ${index + 1}`,
+      unit: 'lb' as const,
+      sourceProductIds: ['filets'],
+    }));
+    const settings = { ...DEFAULT_SETTINGS, donationItems };
+    const events = [wasteEvent({
+      dayKey: '2026-08-01',
+      eventAt: new Date('2026-08-01T11:00:00'),
+    })];
+    const donationRecord: DonationRecord = {
+      storeId: '00756',
+      dayKey: '2026-08-03',
+      actuals: Object.fromEntries(donationItems.map((item) => [item.id, 0])),
+      confirmedZeroItemIds: donationItems.map((item) => item.id),
+      predictions: {},
+      units: {},
+      variance: {},
+      initials: 'CL',
+      submittedAt: new Date(),
+      submittedBy: 'uid',
+      submittedByName: 'Store team',
+      revision: 1,
+    };
+    const buffer = await createWasteTrendWorkbook({
+      events,
+      trend: buildWasteTrend(events, settings, 'hour'),
+      settings,
+      grouping: 'hour',
+      startDayKey: '2026-08-01',
+      endDayKey: '2026-08-01',
+      source: 'live',
+      metric: 'quantity',
+      usageReport: buildUsageRangeReport({
+        settings,
+        startDayKey: '2026-08-01',
+        endDayKey: '2026-08-01',
+        now: new Date('2026-08-04T12:00:00'),
+        wasteEvents: events,
+        donationRecords: [donationRecord],
+        usageRecords: [],
+      }),
+    });
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buffer);
+
+    const usage = workbook.getWorksheet('Usage Confidence');
+    expect(usage?.getCell('G7').value).toBe('Failed count (4 zero items)');
+    expect(usage?.getCell('I7').value).toContain('Donation count failed review');
   });
 });

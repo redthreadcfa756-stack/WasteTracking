@@ -69,6 +69,7 @@ import {
   detectDaypart,
   displayProductQuantity,
   donationPrediction,
+  FAILED_DONATION_ZERO_ITEM_COUNT,
   formatDuration,
   formatDurationInput,
   formatMoney,
@@ -2106,6 +2107,8 @@ function UsageScorePanel({ score, loading, error, donationDayKey, confirmationBu
 }) {
   const statusLabel = score?.status === 'reliable'
     ? 'Reliable for reporting'
+    : score?.donationRecordingFailed
+      ? 'Unreliable · donation count failed'
     : score?.status === 'provisional'
       ? 'Provisional · donation pending'
       : score?.status === 'caution'
@@ -2164,9 +2167,13 @@ function UsageScorePanel({ score, loading, error, donationDayKey, confirmationBu
             <Stat label="Logging continuity" value={`${score.continuityScore}%`} detail="Unexplained three-hour gaps · 25% of score" />
             <Stat
               label="Donation reconciliation"
-              value={score.donationScore === null ? 'Pending' : `${score.donationScore}%`}
-              detail="25% weight tolerance · 30% of score"
-              tone={score.donationScore !== null && score.donationScore < 80 ? 'danger' : undefined}
+              value={score.donationRecordingFailed
+                ? 'Failed count'
+                : score.donationScore === null ? 'No evidence' : `${score.donationScore}%`}
+              detail={score.donationRecordingFailed
+                ? `${score.zeroDonationItemCount} Cool Down products entered as zero`
+                : '25% weight tolerance · 30% of score'}
+              tone={score.donationRecordingFailed || (score.donationScore !== null && score.donationScore < 80) ? 'danger' : undefined}
             />
           </div>
 
@@ -2198,7 +2205,7 @@ function UsageScorePanel({ score, loading, error, donationDayKey, confirmationBu
             ))}
           </div>
 
-          <details className="usage-score-details" open={score.reportEligible}>
+          <details className="usage-score-details" open={score.reportEligible || score.donationRecordingFailed}>
             <summary>Why this score? · Tracked vs donated</summary>
             {score.donationComparisons.length > 0 && (
               <div className="usage-donation-comparisons">
@@ -2215,9 +2222,13 @@ function UsageScorePanel({ score, loading, error, donationDayKey, confirmationBu
                       </div>
                       <div>
                         <strong className={comparison.scoreContribution >= 99.5 ? 'meets-threshold' : 'below-threshold'}>
-                          {Math.round(comparison.trackedPercent)}%
+                          {comparison.trackedPercent === null
+                            ? comparison.zeroStatus === 'confirmed-zero' ? 'Zero confirmed' : 'Needs review'
+                            : `${Math.round(comparison.trackedPercent)}%`}
                         </strong>
-                        <span>{exactMatch
+                        <span>{comparison.trackedPercent === null
+                          ? `${formatQuantity(comparison.trackedAmount)} ${comparison.unit} tracked with zero donated`
+                          : exactMatch
                           ? 'Exact match'
                           : `${formatQuantity(Math.abs(difference))} ${comparison.unit} ${difference > 0 ? 'over' : 'under'}`}</span>
                       </div>
@@ -2595,6 +2606,14 @@ function DonationsTab({ settings, member, currentDay, notify }: {
       (actuals[item.id] || 0) + (addedAmounts[item.id] || 0),
     ]))
     : actuals;
+  const zeroDonationItems = settings.donationItems
+    .filter((item) => item.sourceProductIds.length > 0 && (submittedActuals[item.id] || 0) <= 0)
+    .map((item) => ({
+      id: item.id,
+      name: item.name,
+      unit: item.unit,
+      trackedAmount: Math.max(0, livePredictions[item.id] || 0),
+    }));
   return (
     <section className="panel-stack">
       <div className="section-heading">
@@ -2727,8 +2746,9 @@ function DonationsTab({ settings, member, currentDay, notify }: {
             <DonationSubmit
               existing={existing}
               dayLabel={selectedDayLabel}
+              zeroDonationItems={zeroDonationItems}
               onClose={() => setSubmitOpen(false)}
-              onSubmit={async (initials) => {
+              onSubmit={async (initials, confirmedZeroItemIds) => {
                 const variance = Object.fromEntries(settings.donationItems.map((item) => {
                   const predicted = predictions[item.id];
                   return [item.id, predicted === null ? null : (submittedActuals[item.id] || 0) - predicted];
@@ -2737,6 +2757,7 @@ function DonationsTab({ settings, member, currentDay, notify }: {
                   storeId: member.storeId,
                   dayKey: selectedDay,
                   actuals: submittedActuals,
+                  confirmedZeroItemIds,
                   predictions,
                   units: Object.fromEntries(settings.donationItems.map((item) => [item.id, item.unit])),
                   variance,
@@ -2759,13 +2780,20 @@ function DonationsTab({ settings, member, currentDay, notify }: {
   );
 }
 
-function DonationSubmit({ existing, dayLabel, onClose, onSubmit }: {
+function DonationSubmit({ existing, dayLabel, zeroDonationItems, onClose, onSubmit }: {
   existing: DonationRecord | null;
   dayLabel: string;
+  zeroDonationItems: Array<{
+    id: string;
+    name: string;
+    unit: 'lb' | 'each';
+    trackedAmount: number;
+  }>;
   onClose: () => void;
-  onSubmit: (initials: string) => Promise<void>;
+  onSubmit: (initials: string, confirmedZeroItemIds: string[]) => Promise<void>;
 }) {
   const [initials, setInitials] = useState('');
+  const [zerosReviewed, setZerosReviewed] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const submit = async (event: FormEvent) => {
@@ -2775,9 +2803,13 @@ function DonationSubmit({ existing, dayLabel, onClose, onSubmit }: {
       setError('Enter 2–5 letters.');
       return;
     }
+    if (zeroDonationItems.length > 0 && !zerosReviewed) {
+      setError('Review and confirm the zero Cool Down items before saving.');
+      return;
+    }
     setBusy(true);
     try {
-      await onSubmit(normalized);
+      await onSubmit(normalized, zeroDonationItems.map((item) => item.id));
     } catch (caught) {
       setError(errorMessage(caught));
       setBusy(false);
@@ -2789,9 +2821,42 @@ function DonationSubmit({ existing, dayLabel, onClose, onSubmit }: {
         <p>{existing
           ? `Any corrected saved totals and added amounts will be combined for ${dayLabel}. The calculated updated totals will replace that date’s saved record.`
           : `This creates one final donation record for ${dayLabel}.`}</p>
+        {zeroDonationItems.length > 0 && (
+          <div className={`donation-zero-review${zeroDonationItems.length >= FAILED_DONATION_ZERO_ITEM_COUNT ? ' failed-count' : ''}`} role="alert">
+            <AlertTriangle aria-hidden="true" />
+            <div>
+              <strong>{zeroDonationItems.length >= FAILED_DONATION_ZERO_ITEM_COUNT
+                ? `${zeroDonationItems.length} Cool Down products are zero — this donation count will be marked failed.`
+                : `Review ${zeroDonationItems.length} Cool Down ${zeroDonationItems.length === 1 ? 'product' : 'products'} entered as zero.`}</strong>
+              <span>{zeroDonationItems.length >= FAILED_DONATION_ZERO_ITEM_COUNT
+                ? `Four or more zero Cool Down products cannot produce a reliable usage score. Correct accidental zeros now; a saved failed count can be revised later.`
+                : 'A zero may be correct when tracked Cool Down was reused instead of donated, but it must be confirmed.'}</span>
+              <ul>
+                {zeroDonationItems.map((item) => (
+                  <li key={item.id}>
+                    <strong>{item.name}</strong>
+                    {item.trackedAmount > 0 && ` · ${formatQuantity(item.trackedAmount)} ${item.unit} tracked in its donation window`}
+                  </li>
+                ))}
+              </ul>
+              <label className="toggle-row donation-zero-confirmation">
+                <input
+                  type="checkbox"
+                  checked={zerosReviewed}
+                  onChange={(event) => setZerosReviewed(event.target.checked)}
+                />
+                <span>I reviewed these products and confirm the entered zeros.</span>
+              </label>
+            </div>
+          </div>
+        )}
         <label>Initials<input autoFocus maxLength={5} value={initials} onChange={(event) => setInitials(event.target.value.toUpperCase())} /></label>
         {error && <p className="form-error" role="alert">{error}</p>}
-        <button className="primary-button" disabled={busy}>{busy ? 'Saving…' : existing ? 'Save updated totals' : 'Save final count'}</button>
+        <button className="primary-button" disabled={busy || (zeroDonationItems.length > 0 && !zerosReviewed)}>{busy
+          ? 'Saving…'
+          : zeroDonationItems.length >= FAILED_DONATION_ZERO_ITEM_COUNT
+            ? 'Save as failed count'
+            : existing ? 'Save updated totals' : 'Save final count'}</button>
       </form>
     </Modal>
   );

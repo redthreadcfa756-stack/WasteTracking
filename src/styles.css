@@ -527,6 +527,22 @@ code { font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.9em; }
 .donation-replacement-warning svg { width: 20px; flex: 0 0 auto; }
 .donation-replacement-warning > div { display: grid; gap: 0.2rem; }
 .donation-replacement-warning span { font-size: 0.84rem; line-height: 1.4; }
+.donation-zero-review {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.7rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid #e8c56e;
+  border-left: 7px solid #d49000;
+  color: #654800;
+  background: #fff8df;
+}
+.donation-zero-review.failed-count { border-color: #efb9c1; border-left-color: var(--danger); color: var(--danger); background: #fff4f5; }
+.donation-zero-review > svg { width: 20px; flex: 0 0 auto; }
+.donation-zero-review > div { display: grid; gap: 0.55rem; }
+.donation-zero-review span, .donation-zero-review li { font-size: 0.8rem; line-height: 1.4; }
+.donation-zero-review ul { margin: 0; padding-left: 1.15rem; max-height: 180px; overflow-y: auto; }
+.donation-zero-confirmation { color: var(--ink); font-weight: 700; }
 .alarm-muted-notice {
   display: flex;
   align-items: flex-start;

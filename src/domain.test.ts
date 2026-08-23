@@ -342,6 +342,125 @@ describe('domain rules', () => {
     });
   });
 
+  it('marks a donation count with four linked zero products as failed and prevents a reliable score', () => {
+    const product = DEFAULT_SETTINGS.products.find((candidate) => candidate.id === 'filets')!;
+    const donationItems = Array.from({ length: 5 }, (_, index) => ({
+      id: `filet-donation-${index + 1}`,
+      name: `Filet ${index + 1}`,
+      unit: 'lb' as const,
+      sourceProductIds: ['filets'],
+    }));
+    const settings = {
+      ...DEFAULT_SETTINGS,
+      dayparts: [{
+        ...DEFAULT_SETTINGS.dayparts[0],
+        startMinutes: 390,
+        endMinutes: 450,
+      }],
+      donationItems,
+    };
+    const actuals = Object.fromEntries(donationItems.map((item, index) => [
+      item.id,
+      index < 4 ? 0 : product.averageWeightLb,
+    ]));
+    const result = buildUsageScore({
+      settings,
+      selectedDayKey: '2026-08-14',
+      now: new Date('2026-08-16T12:00:00'),
+      currentWaste: [event({
+        dayKey: '2026-08-14',
+        productId: 'filets',
+        equivalentUnits: 1,
+        daypartId: 'breakfast',
+        eventAt: new Date('2026-08-14T07:00:00'),
+      })],
+      previousWaste: [],
+      donationRecord: {
+        storeId: '00756',
+        dayKey: '2026-08-15',
+        actuals,
+        confirmedZeroItemIds: donationItems.slice(0, 4).map((item) => item.id),
+        predictions: {},
+        units: {},
+        variance: {},
+        initials: 'CL',
+        submittedAt: new Date(),
+        submittedBy: 'uid',
+        submittedByName: 'Store team',
+        revision: 1,
+      },
+      usageRecord: null,
+    });
+
+    expect(result).toMatchObject({
+      score: 45,
+      donationScore: 0,
+      donationRecordingFailed: true,
+      zeroDonationItemCount: 4,
+      reportEligible: false,
+      status: 'unreliable',
+    });
+    expect(result.reasons).toContain('Donation count failed review: 4 Cool Down products were entered as zero (failure threshold: 4)');
+  });
+
+  it('keeps fewer confirmed zero products visible without treating the donation count as failed', () => {
+    const product = DEFAULT_SETTINGS.products.find((candidate) => candidate.id === 'filets')!;
+    const settings = {
+      ...DEFAULT_SETTINGS,
+      dayparts: [{
+        ...DEFAULT_SETTINGS.dayparts[0],
+        startMinutes: 390,
+        endMinutes: 450,
+      }],
+      donationItems: [
+        { id: 'confirmed-zero', name: 'Confirmed zero', unit: 'lb' as const, sourceProductIds: ['filets'] },
+        { id: 'filet-donation', name: 'Filet', unit: 'lb' as const, sourceProductIds: ['filets'] },
+      ],
+    };
+    const result = buildUsageScore({
+      settings,
+      selectedDayKey: '2026-08-14',
+      now: new Date('2026-08-16T12:00:00'),
+      currentWaste: [event({
+        dayKey: '2026-08-14',
+        productId: 'filets',
+        equivalentUnits: 1,
+        daypartId: 'breakfast',
+        eventAt: new Date('2026-08-14T07:00:00'),
+      })],
+      previousWaste: [],
+      donationRecord: {
+        storeId: '00756',
+        dayKey: '2026-08-15',
+        actuals: { 'confirmed-zero': 0, 'filet-donation': product.averageWeightLb },
+        confirmedZeroItemIds: ['confirmed-zero'],
+        predictions: {},
+        units: {},
+        variance: {},
+        initials: 'CL',
+        submittedAt: new Date(),
+        submittedBy: 'uid',
+        submittedByName: 'Store team',
+        revision: 1,
+      },
+      usageRecord: null,
+    });
+
+    expect(result).toMatchObject({
+      score: 100,
+      donationScore: 100,
+      donationRecordingFailed: false,
+      zeroDonationItemCount: 1,
+      unconfirmedZeroItemCount: 0,
+      reportEligible: true,
+    });
+    expect(result.donationComparisons.find((comparison) => comparison.itemId === 'confirmed-zero')).toMatchObject({
+      donatedAmount: 0,
+      trackedPercent: null,
+      zeroStatus: 'confirmed-zero',
+    });
+  });
+
   it('merges repeated taps by product and minute', () => {
     const merged = mergeActivity([
       event({ id: 'a', equivalentUnits: 1, displayQuantity: 1 }),

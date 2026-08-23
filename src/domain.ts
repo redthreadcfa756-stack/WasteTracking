@@ -348,6 +348,7 @@ export function donationPrediction(
 export const USAGE_RELIABLE_MINIMUM = 90;
 export const USAGE_CAUTION_MINIMUM = 75;
 export const USAGE_DONATION_TOLERANCE = 0.25;
+export const FAILED_DONATION_ZERO_ITEM_COUNT = 4;
 export const USAGE_PRESENCE_START_DAY = '2026-08-15';
 export const RELIABLE_USAGE_LABEL = 'Reliable data available';
 export const INSUFFICIENT_USAGE_LABEL = 'Insufficient data for reliable insights';
@@ -383,6 +384,9 @@ export interface UsageScoreResult {
   presenceMeasured: boolean;
   continuityScore: number;
   donationScore: number | null;
+  donationRecordingFailed: boolean;
+  zeroDonationItemCount: number;
+  unconfirmedZeroItemCount: number;
   donationComparisons: DonationUsageComparison[];
   dayparts: DaypartUsageScore[];
   reasons: string[];
@@ -394,8 +398,9 @@ export interface DonationUsageComparison {
   unit: DonationItemConfig['unit'];
   trackedAmount: number;
   donatedAmount: number;
-  trackedPercent: number;
+  trackedPercent: number | null;
   scoreContribution: number;
+  zeroStatus: 'not-zero' | 'confirmed-zero' | 'unconfirmed-zero';
 }
 
 export function usagePresenceSlotKey(daypartId: DaypartId, startMinutes: number): string {
@@ -573,10 +578,19 @@ export function buildUsageScore({
     : 0;
 
   let donationScore: number | null = null;
+  let donationRecordingFailed = false;
+  let zeroDonationItemCount = 0;
+  let unconfirmedZeroItemCount = 0;
   const donationReasons: string[] = [];
   const donationComparisons: DonationUsageComparison[] = [];
   if (donationRecord) {
     const comparableItems = settings.donationItems.filter((item) => item.sourceProductIds.length > 0);
+    const confirmedZeroItemIds = new Set(donationRecord.confirmedZeroItemIds || []);
+    zeroDonationItemCount = comparableItems.filter((item) => (
+      Object.hasOwn(donationRecord.actuals, item.id)
+      && Math.max(0, donationRecord.actuals[item.id] || 0) === 0
+    )).length;
+    donationRecordingFailed = zeroDonationItemCount >= FAILED_DONATION_ZERO_ITEM_COUNT;
     const itemScores = comparableItems.flatMap((item) => {
       const actual = Math.max(0, donationRecord.actuals[item.id] || 0);
       const tracked = Math.max(0, donationPrediction(
@@ -585,7 +599,25 @@ export function buildUsageScore({
         reconciliationPreviousWaste,
         reconciliationCurrentWaste,
       ) || 0);
-      if (actual <= 0) return [];
+      if (actual <= 0) {
+        if (tracked <= 0) return [];
+        const confirmedZero = confirmedZeroItemIds.has(item.id);
+        if (!confirmedZero) unconfirmedZeroItemCount += 1;
+        donationComparisons.push({
+          itemId: item.id,
+          itemName: item.name,
+          unit: item.unit,
+          trackedAmount: tracked,
+          donatedAmount: 0,
+          trackedPercent: null,
+          scoreContribution: confirmedZero ? 100 : 0,
+          zeroStatus: confirmedZero ? 'confirmed-zero' : 'unconfirmed-zero',
+        });
+        if (!confirmedZero) {
+          donationReasons.push(`${item.name}: Cool Down activity was tracked, but the zero donation amount was not confirmed`);
+        }
+        return [];
+      }
       const fullCreditAt = actual * (1 - USAGE_DONATION_TOLERANCE);
       const itemScore = fullCreditAt <= 0 ? 100 : Math.min(100, tracked / fullCreditAt * 100);
       donationComparisons.push({
@@ -596,15 +628,18 @@ export function buildUsageScore({
         donatedAmount: actual,
         trackedPercent: tracked / actual * 100,
         scoreContribution: itemScore,
+        zeroStatus: 'not-zero',
       });
       if (itemScore < 99.5) {
         donationReasons.push(`${item.name}: tracked ${formatQuantity(tracked)} vs donated ${formatQuantity(actual)}`);
       }
       return [itemScore];
     });
-    donationScore = itemScores.length
-      ? itemScores.reduce((sum, score) => sum + score, 0) / itemScores.length
-      : 100;
+    donationScore = donationRecordingFailed
+      ? 0
+      : itemScores.length
+        ? itemScores.reduce((sum, score) => sum + score, 0) / itemScores.length
+        : null;
   }
 
   const baseWeight = presenceMeasured ? 70 : 25;
@@ -614,11 +649,14 @@ export function buildUsageScore({
   const hasCriticalGap = dayparts.some((daypart) => (
     daypart.needsUsageReview || daypart.missedWaste || daypart.uncertainWaste
   ));
-  const donationPasses = donationScore !== null && donationScore >= 80;
+  const donationPasses = donationScore !== null
+    && donationScore >= 80
+    && !donationRecordingFailed
+    && unconfirmedZeroItemCount === 0;
   const reportEligible = score >= USAGE_RELIABLE_MINIMUM && !hasCriticalGap && donationPasses;
   const status: UsageScoreStatus = reportEligible
     ? 'reliable'
-    : score >= USAGE_RELIABLE_MINIMUM && donationScore === null && !hasCriticalGap
+    : score >= USAGE_RELIABLE_MINIMUM && !donationRecord && donationScore === null && !hasCriticalGap
       ? 'provisional'
       : score >= USAGE_CAUTION_MINIMUM
         ? 'caution'
@@ -628,7 +666,11 @@ export function buildUsageScore({
     ...donationReasons,
   ];
   if (!donationRecord) reasons.push('Donation reconciliation is pending for this donation window');
-  else if (donationScore !== null && donationScore < 80) reasons.push('Donation reconciliation is below the required 80%');
+  else if (donationRecordingFailed) {
+    reasons.push(`Donation count failed review: ${zeroDonationItemCount} Cool Down products were entered as zero (failure threshold: ${FAILED_DONATION_ZERO_ITEM_COUNT})`);
+  } else if (donationScore === null) {
+    reasons.push('Donation submission has no positive linked Cool Down amounts to reconcile');
+  } else if (donationScore < 80) reasons.push('Donation reconciliation is below the required 80%');
   if (reasons.length === 0) {
     reasons.push(presenceMeasured
       ? 'Presence, continuity, and donations all support reliable reporting'
@@ -644,6 +686,9 @@ export function buildUsageScore({
     presenceMeasured,
     continuityScore: Math.round(continuityScore),
     donationScore: donationScore === null ? null : Math.round(donationScore),
+    donationRecordingFailed,
+    zeroDonationItemCount,
+    unconfirmedZeroItemCount,
     donationComparisons,
     dayparts,
     reasons,

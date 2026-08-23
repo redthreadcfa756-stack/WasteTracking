@@ -65,11 +65,15 @@ function addUsageWorksheet(
       ? 'Awaiting donation'
       : day.result.coverageScore === null ? 'Not measured' : day.result.coverageScore / 100;
     sheet.getCell(rowNumber, 6).value = day.result ? day.result.continuityScore / 100 : null;
-    sheet.getCell(rowNumber, 7).value = day.result?.donationScore === null || !day.result
+    sheet.getCell(rowNumber, 7).value = !day.result
       ? null
-      : day.result.donationScore / 100;
+      : day.result.donationRecordingFailed
+        ? `Failed count (${day.result.zeroDonationItemCount} zero items)`
+        : day.result.donationScore === null ? 'No comparable items' : day.result.donationScore / 100;
     sheet.getCell(rowNumber, 8).value = day.result?.donationComparisons.map((comparison) => (
-      `${comparison.itemName}: ${comparison.trackedAmount.toFixed(2)} tracked / ${comparison.donatedAmount.toFixed(2)} donated ${comparison.unit} (${Math.round(comparison.trackedPercent)}%)`
+      `${comparison.itemName}: ${comparison.trackedAmount.toFixed(2)} tracked / ${comparison.donatedAmount.toFixed(2)} donated ${comparison.unit} (${comparison.trackedPercent === null
+        ? comparison.zeroStatus === 'confirmed-zero' ? 'zero confirmed' : 'zero needs review'
+        : `${Math.round(comparison.trackedPercent)}%`})`
     )).join('; ') || '—';
     sheet.getCell(rowNumber, 9).value = day.reasons.join('; ');
     [5, 6, 7].forEach((column) => {

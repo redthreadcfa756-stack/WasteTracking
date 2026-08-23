@@ -90,7 +90,7 @@ service cloud.firestore {
     function validDonationRecord(storeId) {
       return request.resource.data.keys().hasOnly([
           'storeId', 'dayKey', 'actuals', 'predictions', 'units', 'variance', 'initials',
-          'submittedAt', 'submittedBy', 'submittedByName', 'revision'
+          'submittedAt', 'submittedBy', 'submittedByName', 'revision', 'confirmedZeroItemIds'
         ])
         && request.resource.data.storeId == storeId
         && request.resource.data.submittedBy == request.auth.uid
@@ -99,6 +99,9 @@ service cloud.firestore {
         && request.resource.data.initials.size() <= 5
         && request.resource.data.revision is int
         && request.resource.data.revision >= 1
+        && (!request.resource.data.keys().hasAny(['confirmedZeroItemIds'])
+          || (request.resource.data.confirmedZeroItemIds is list
+            && request.resource.data.confirmedZeroItemIds.size() <= 25))
         && request.resource.data.submittedAt is timestamp;
     }
 
