@@ -1453,15 +1453,40 @@ label,
   }
 
   .tabbar.tab-count-5 button,
-  .tabbar.tab-count-6 button {
+  .tabbar.tab-count-6 button,
+  .tabbar.tab-count-7 button {
     gap: 0.12rem;
     font-size: 0.58rem;
     letter-spacing: 0.02em;
   }
 
   .tabbar.tab-count-5 button svg,
-  .tabbar.tab-count-6 button svg {
+  .tabbar.tab-count-6 button svg,
+  .tabbar.tab-count-7 button svg {
     width: 18px;
     height: 18px;
   }
+}
+
+/* Saturday closing log: keep all three quantities readable on phones. */
+.saturday-prep { min-width: 0; }
+.admin-dropdown > .saturday-prep { padding: 1rem; }
+.prep-section, .prep-summary { background: var(--surface, white); border: 1px solid #d9e2ec; border-radius: 14px; padding: 1rem; }
+.prep-section > p, .saturday-prep > p { color: #52616b; line-height: 1.5; }
+.prep-weight-row, .prep-weight-head { display: grid; grid-template-columns: minmax(0, 1fr) 100px 100px; align-items: center; gap: .65rem; padding: .7rem 0; }
+.prep-weight-row + .prep-weight-row { border-top: 1px solid #e4e9ee; }
+.prep-weight-head { font-weight: 700; color: #52616b; }
+.prep-item { border-top: 1px solid #e4e9ee; padding: 1rem 0; }
+.prep-item-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .75rem; margin-top: .6rem; }
+.prep-item-fields label, .prep-item-fields > div { display: flex; flex-direction: column; gap: .5rem; font-size: .82rem; }
+.prep-item-fields .table-input { width: 100%; margin-top: auto; }
+.prep-item-fields output { display: block; font-size: 1.35rem; font-weight: 700; padding: .45rem; margin-top: auto; color: #176642; }
+.prep-save-status { font-weight: 700; }
+.saturday-prep .table-input { min-width: 0; width: 100%; min-height: 44px; }
+.saturday-prep .table-input[aria-invalid="true"] { border-color: #ba002e; }
+@media (max-width: 480px) {
+  .prep-weight-row, .prep-weight-head { grid-template-columns: minmax(0, 1fr) 65px 65px; gap: .4rem; font-size: .8rem; }
+  .prep-section, .prep-summary { padding: .75rem; }
+  .prep-item-fields { gap: .5rem; }
+  .prep-item-fields label, .prep-item-fields > div { font-size: .72rem; }
 }

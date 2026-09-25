@@ -140,6 +140,68 @@ service cloud.firestore {
         && request.resource.data.updatedAt is timestamp;
     }
 
+    // Each autosave changes one field. Validating that field keeps rule evaluation
+    // bounded even when all 60 entries are filled. Final submission preserves values.
+    function validPrepEdit(data) {
+      let key = data.lastEditedField;
+      let value = data.values.get(key, null);
+      return (key in [
+          'shredded-chicken_lb', 'spicy-chicken_lb', 'romaine_lb', 'lettuce-cabbage_lb',
+          'green-leaf_lb', 'tomatoes_lb', 'bacon-crumble_lb', 'kale-batch_lb',
+          'apples_lb', 'strawberries_lb', 'blueberries_lb', 'mandarin-oranges_lb',
+          'cheddar-blend_lb', 'blue-cheese_lb', 'cobb_eod', 'cobb_left',
+          'market_eod', 'market_left', 'southwest_eod', 'southwest_left',
+          'side_eod', 'side_left', 'kale-cupped_eod', 'kale-cupped_left',
+          'small-fruit_eod', 'small-fruit_left', 'medium-fruit_eod', 'medium-fruit_left',
+          'large-fruit_eod', 'large-fruit_left', 'parfait_eod', 'parfait_left',
+          'grilled-wrap_eod', 'grilled-wrap_left', 'veggie-wrap_eod', 'veggie-wrap_left',
+          'cookies_eod', 'cookies_left', 'brownies_eod', 'brownies_left',
+          'bacon-strips_eod', 'bacon-strips_left', 'eggs_eod', 'eggs_left'
+        ]
+          && (value == null || (value is int && value >= 0 && value <= 10000)))
+        || (key in [
+          'shredded-chicken_oz', 'spicy-chicken_oz', 'romaine_oz', 'lettuce-cabbage_oz',
+          'green-leaf_oz', 'tomatoes_oz', 'bacon-crumble_oz', 'kale-batch_oz',
+          'apples_oz', 'strawberries_oz', 'blueberries_oz', 'mandarin-oranges_oz',
+          'cheddar-blend_oz', 'blue-cheese_oz'
+        ]
+          && (value == null || (value is number && value >= 0 && value < 16)))
+        || (key in ['tea_eod', 'tea_left']
+          && (value == null || (value is number && value >= 0 && value <= 10000)));
+    }
+
+    function completePrepValues(values) {
+      return values.size() == 60 && !values.values().hasAny([null])
+        && values['cobb_left'] <= values['cobb_eod']
+        && values['market_left'] <= values['market_eod']
+        && values['southwest_left'] <= values['southwest_eod']
+        && values['side_left'] <= values['side_eod']
+        && values['kale-cupped_left'] <= values['kale-cupped_eod']
+        && values['small-fruit_left'] <= values['small-fruit_eod']
+        && values['medium-fruit_left'] <= values['medium-fruit_eod']
+        && values['large-fruit_left'] <= values['large-fruit_eod']
+        && values['parfait_left'] <= values['parfait_eod']
+        && values['grilled-wrap_left'] <= values['grilled-wrap_eod']
+        && values['veggie-wrap_left'] <= values['veggie-wrap_eod']
+        && values['cookies_left'] <= values['cookies_eod']
+        && values['brownies_left'] <= values['brownies_eod']
+        && values['bacon-strips_left'] <= values['bacon-strips_eod']
+        && values['eggs_left'] <= values['eggs_eod']
+        && values['tea_left'] <= values['tea_eod'];
+    }
+
+    function validSaturdayPrep(storeId, selectedDayKey) {
+      let data = request.resource.data;
+      return data.keys().hasOnly(['storeId', 'dayKey', 'values', 'updatedAt', 'updatedBy', 'submittedAt', 'lastEditedField'])
+        && data.storeId == storeId
+        && data.dayKey == selectedDayKey
+        && selectedDayKey.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && data.values is map
+        && data.lastEditedField is string
+        && data.updatedBy == request.auth.uid
+        && data.updatedAt == request.time;
+    }
+
     match /members/{uid} {
       allow read, write: if false;
     }
@@ -190,6 +252,31 @@ service cloud.firestore {
         allow read: if belongsToStore(storeId);
         allow create, update: if belongsToStore(storeId) && validSosEntry(storeId);
         allow delete: if belongsToStore(storeId);
+      }
+
+      match /saturdayPrep/{dayKey} {
+        allow read: if belongsToStore(storeId);
+        allow create: if belongsToStore(storeId)
+          && validSaturdayPrep(storeId, dayKey)
+          && request.resource.data.get('submittedAt', null) == null
+          && request.resource.data.values.keys().hasOnly([request.resource.data.lastEditedField])
+          && validPrepEdit(request.resource.data);
+        allow update: if belongsToStore(storeId)
+          && validSaturdayPrep(storeId, dayKey)
+          && (
+            (resource.data.get('submittedAt', null) == null
+              && request.resource.data.get('submittedAt', null) == null
+              && request.resource.data.values.diff(resource.data.values).affectedKeys().hasOnly([request.resource.data.lastEditedField])
+              && validPrepEdit(request.resource.data))
+            || (resource.data.get('submittedAt', null) == null
+              && request.resource.data.get('submittedAt', null) == request.time
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['submittedAt', 'updatedAt', 'updatedBy'])
+              && completePrepValues(request.resource.data.values))
+            || (resource.data.get('submittedAt', null) != null
+              && request.resource.data.get('submittedAt', null) == null
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['submittedAt', 'updatedAt', 'updatedBy']))
+          );
+        allow delete: if false;
       }
 
       match /donationRecords/{dayKey} {

@@ -1,3 +1,7 @@
+import { SaturdayPrepTab } from './SaturdayPrepTab';
+import { isSaturday, prepDayKey } from './saturdayPrep';
+import { loadSaturdayPrep } from './saturdayPrepData';
+import { createSaturdayPrepWorkbook } from './saturdayPrepWorkbook';
 import {
   AlertTriangle,
   CalendarDays,
@@ -113,7 +117,7 @@ import type {
   WasteEvent,
 } from './types';
 
-type TabId = 'waste' | 'discard' | 'sos' | 'donations' | 'usage' | 'admin';
+type TabId = 'waste' | 'discard' | 'sos' | 'donations' | 'usage' | 'saturday-prep' | 'admin';
 type MenuSelection = 'auto' | MenuId;
 type ExportPeriod = 1 | 30 | 60 | 90 | WasteExportPreset | 'custom';
 const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || '00756';
@@ -466,6 +470,7 @@ const TABS: Array<{ id: TabId; label: string; icon: typeof Snowflake }> = [
   { id: 'sos', label: 'SOS', icon: Timer },
   { id: 'donations', label: 'Donations', icon: Gift },
   { id: 'usage', label: 'Usage', icon: ShieldCheck },
+  { id: 'saturday-prep', label: 'Saturday Prep', icon: CalendarDays },
   { id: 'admin', label: 'Admin', icon: Settings },
 ];
 
@@ -581,9 +586,11 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
   const [alarmPlaybackBlocked, setAlarmPlaybackBlocked] = useState(false);
   const alarmActionInProgress = useRef(false);
   const attemptedPresenceSlot = useRef('');
+  const saturdayAvailable = isSaturday(prepDayKey(now));
   const visibleTabs = TABS.filter((tab) => (
     (tab.id !== 'sos' || settings.sosEnabled)
     && (tab.id !== 'discard' || settings.discardTrackingEnabled)
+    && (tab.id !== 'saturday-prep' || saturdayAvailable)
   ));
 
   const notify = useCallback((message: string) => {
@@ -659,10 +666,11 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
     if (
       (activeTab === 'sos' && !settings.sosEnabled)
       || (activeTab === 'discard' && !settings.discardTrackingEnabled)
+      || (activeTab === 'saturday-prep' && !saturdayAvailable)
     ) {
       setActiveTab('waste');
     }
-  }, [activeTab, settings.sosEnabled, settings.discardTrackingEnabled]);
+  }, [activeTab, settings.sosEnabled, settings.discardTrackingEnabled, saturdayAvailable]);
 
   useIdleAction(activeTab === 'discard', DISCARD_IDLE_TIMEOUT_MS, () => {
     returnToCooldown('Returned to Cool Down after 45 seconds of inactivity.');
@@ -979,6 +987,7 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
             notify={notify}
           />
         )}
+        {activeTab === 'saturday-prep' && <SaturdayPrepTab storeId={member.storeId} />}
         {activeTab === 'usage' && (
           <UsageTab
             settings={settings}
@@ -2885,6 +2894,8 @@ function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDay
   const [exportMetric, setExportMetric] = useState<'cost' | 'quantity'>('cost');
   const [exporting, setExporting] = useState(false);
   const [exportingDonations, setExportingDonations] = useState(false);
+  const [exportingPrep, setExportingPrep] = useState(false);
+  const [prepOpen, setPrepOpen] = useState(false);
   const [exportSource, setExportSource] = useState<'live' | 'demo'>('live');
   const [changingDemoData, setChangingDemoData] = useState(false);
 
@@ -3124,6 +3135,33 @@ function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDay
     }
   };
 
+  const exportPrep = async () => {
+    setExportingPrep(true);
+    try {
+      const records = await loadSaturdayPrep(storeId, exportStartDate, exportEndDate);
+      if (!records.length) {
+        notify('No Saturday Prep logs were found in this date range.');
+        return;
+      }
+      const workbook = await createSaturdayPrepWorkbook(records, exportStartDate, exportEndDate);
+      const url = URL.createObjectURL(new Blob([workbook], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `saturday-prep-${exportStartDate}-through-${exportEndDate}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      notify('Saturday Prep report downloaded. Drafts are labeled as not final.');
+    } catch (caught) {
+      notify(errorMessage(caught));
+    } finally {
+      setExportingPrep(false);
+    }
+  };
+
   const seedDemoData = async () => {
     setChangingDemoData(true);
     try {
@@ -3159,6 +3197,10 @@ function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDay
         <button className="primary-button" onClick={save} disabled={saving}><Save /> {saving ? 'Saving…' : 'Save all changes'}</button>
       </div>
       <AlarmMutedNotice page="Admin" timeout="2 minutes" />
+      <details className="admin-dropdown" onToggle={(event) => setPrepOpen(event.currentTarget.open)}>
+        <summary>Saturday Prep · view, enter, or correct a log</summary>
+        {prepOpen && <SaturdayPrepTab storeId={storeId} admin />}
+      </details>
       <div className="admin-strip">
         <label>This device name<input value={device} onChange={(event) => setDevice(event.target.value)} /></label>
         <label className="toggle-row">
@@ -3401,7 +3443,7 @@ function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDay
         <summary>Export reports</summary>
         <div className="export-panel">
         <div>
-          <p>Download cool down trends or submitted donation totals for the selected range. Every workbook includes daily usage scores and confidence.</p>
+          <p>Download cool down trends, submitted donation totals, or Saturday Prep logs for the selected range. Cool Down and Donations workbooks include usage scores and confidence.</p>
         </div>
         <label>
           Starting date
@@ -3475,6 +3517,11 @@ function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDay
         <button className="secondary-button" onClick={exportDonations} disabled={exportingDonations || !exportStartDate || !exportEndDate}>
           <Download aria-hidden="true" /> {exportingDonations ? 'Preparing…' : 'Download donations workbook'}
         </button>
+        <button className="secondary-button" onClick={exportPrep}
+          disabled={exportingPrep || exportSource !== 'live' || !exportStartDate || !exportEndDate}>
+          <Download aria-hidden="true" /> {exportingPrep ? 'Preparing…' : 'Download Saturday Prep workbook'}
+        </button>
+        <p>Saturday Prep reports use live data and include daily totals and every item. Unsubmitted drafts are clearly labeled.</p>
         <div className="demo-data-controls">
           <div>
             <strong>Demo export data</strong>

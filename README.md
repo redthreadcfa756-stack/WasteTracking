@@ -82,6 +82,26 @@ Every cool down workbook includes a Daily Waste Cost sheet that displays Monday 
 
 The Discard tab includes Large fries as a discard-only product counted by serving. Its default per-serving weight is 6.15 ounces, the midpoint of the 5.6–6.7 ounce range, for optional admin pricing calculations.
 
+### Saturday Prep
+
+The **Saturday Prep** staff tab appears on Saturdays in the store's `America/New_York` timezone. **Admin → Saturday Prep** is available every day and supports selecting any past Saturday or the current Saturday. It uses the 14 table items and 16 prepared items from the paper closing log.
+
+- At 10 p.m., enter table weights using separate whole-pound and ounce fields, plus the quantity of each prepared item.
+- At 11 p.m., enter what remains to be thrown away. **Promo Free = quantity at 10 p.m. − quantity left at 11 p.m.** Sweet tea is measured in gallons; all other prepared items are counted individually.
+- Each valid edit immediately autosaves to `stores/{storeId}/saturdayPrep/{YYYY-MM-DD}`. Field-level merges preserve edits to other items from other devices. The existing persistent Firestore cache queues offline writes; the form distinguishes pending changes from confirmed saves. Changes to the same field use the last accepted write.
+- **Final Submit** requires all fields, including explicit zeros, to be valid and synced. It reads the latest shared record in a transaction. Submitted logs are read-only until reopened through Admin, then can be corrected and resubmitted without creating duplicate daily records. Admin uses the existing convenience password lock.
+- **Admin → Export reports → Download Saturday Prep workbook** exports the selected live date range with daily totals, individual table weights, and each prepared item's 10 p.m., waste, and Promo Free amounts. Drafts are clearly marked as incomplete/not final, and blank detail cells remain blank. Gallon totals stay separate from item counts. Saturday Prep is reported separately from Cool Down, Discard, Donations, and Usage.
+
+Deploy the updated `firestore.rules` **before deploying the app**; the existing website deployment workflow does not deploy database rules. No new index or data migration is required. The rules validate one edited field per draft write, reject invalid final submissions, and require reopening before submitted values can change. If the item list changes, update its corresponding rules and tests together.
+
+Run the calculation/export tests with `pnpm test`. To include the offline, shared-editing, and submission security tests, use a local Firestore emulator (Java required):
+
+```bash
+pnpm dlx firebase-tools emulators:exec --only firestore --project demo-saturday-prep "pnpm test"
+```
+
+The integration tests run only when `FIRESTORE_EMULATOR_HOST` is set to localhost or `127.0.0.1`, use the demo project, and reset only their dedicated test-date document. They do not use production credentials.
+
 ## 5. Create the Cloudflare Pages project
 
 This repository uses Wrangler Direct Upload from GitHub Actions. Create a **Direct Upload** Pages project named, for example, `waste-sos-tracker`:
