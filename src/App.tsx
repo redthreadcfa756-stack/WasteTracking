@@ -3167,7 +3167,7 @@ function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDay
       link.click();
       link.remove();
       window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-      notify(exportSource === 'demo' ? 'Saturday Prep demo report downloaded.' : 'Saturday Prep report downloaded. Drafts are labeled as not final.');
+      notify(exportSource === 'demo' ? 'Saturday Prep demo report downloaded.' : 'Saturday Prep totals downloaded. Only completed, submitted logs are included.');
     } catch (caught) {
       notify(errorMessage(caught));
     } finally {
@@ -3536,7 +3536,7 @@ function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDay
           disabled={exportingPrep || !exportStartDate || !exportEndDate}>
           <Download aria-hidden="true" /> {exportingPrep ? 'Preparing…' : 'Download Saturday Prep workbook'}
         </button>
-        <p>Saturday Prep reports include daily totals and every item. Choose Demo data for sample Saturdays in your date range; no seeding is needed. Live drafts are labeled as not final.</p>
+        <p>Saturday Prep reports show one total per item for the selected date range: table weights, prepared items wasted, and Promo Free. Only completed, submitted logs count. Choose Demo data for sample Saturdays; no seeding is needed.</p>
         <div className="demo-data-controls">
           <div>
             <strong>Demo export data</strong>

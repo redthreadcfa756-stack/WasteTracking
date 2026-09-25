@@ -49,26 +49,23 @@ describe('Saturday closing reconciliation', () => {
     expect(isSaturday('')).toBe(false);
   });
 
-  it('exports per-item detail, separate units, and clearly labeled incomplete drafts', async () => {
-    const records: SaturdayPrepRecord[] = [
-      { storeId: '00756', dayKey: '2026-09-19', updatedBy: 'test', updatedAt: null,
-        submittedAt: Timestamp.fromMillis(1), values: { ...completedValues(), cobb_eod: 10, cobb_left: 3, romaine_lb: 2, romaine_oz: 8, tea_eod: 2.5, tea_left: .75 } },
-      { storeId: '00756', dayKey: '2026-09-26', updatedBy: 'test', updatedAt: null, values: { cobb_eod: 4 } },
-    ];
-    const bytes = await createSaturdayPrepWorkbook(records, '2026-09-01', '2026-09-30');
+  it('exports range totals per item, carries ounces, and excludes drafts and out-of-range logs', async () => {
+    const base: SaturdayPrepRecord = { storeId: '00756', dayKey: '2026-09-12', updatedBy: 'test', updatedAt: null,
+      submittedAt: Timestamp.fromMillis(1), values: { ...completedValues(), cobb_eod: 10, cobb_left: 3, romaine_lb: 2, romaine_oz: 12, tea_eod: 2.5, tea_left: .75 } };
+    const records = [base, { ...base, dayKey: '2026-09-19' },
+      { ...base, dayKey: '2026-09-26', submittedAt: null, values: { cobb_eod: 400 } },
+      { ...base, dayKey: '2026-08-29' }];
     const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(bytes);
-    expect(workbook.getWorksheet('Daily totals')!.getRow(3).values).toEqual([
-      undefined, '2026-09-19', 'Submitted', 2.5, 3, 7, .75, 1.75,
-    ]);
-    expect(workbook.getWorksheet('Prepared items')!.getRow(2).values).toEqual([
-      undefined, '2026-09-19', 'Submitted', 'Cobb Salad', 'each', 10, 3, 7,
-    ]);
-    const draftRow = workbook.getWorksheet('Prepared items')!.getRow(18);
-    expect(draftRow.getCell(2).value).toContain('Draft');
-    expect(draftRow.getCell(5).value).toBe(4);
-    expect(draftRow.getCell(6).value).toBeNull();
-    expect(draftRow.getCell(7).value).toBeNull();
-    expect(workbook.getWorksheet('Table weights')!.rowCount).toBe(29);
+    await workbook.xlsx.load(await createSaturdayPrepWorkbook(records, '2026-09-01', '2026-09-30'));
+    expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual(['Table weights', 'Prepared items']);
+    const table = workbook.getWorksheet('Table weights')!;
+    const prep = workbook.getWorksheet('Prepared items')!;
+    expect(table.getCell('A3').value).toBe('2 submitted Saturday log(s) included · 1 draft or incomplete log(s) excluded');
+    expect(table.getRow(7).values).toEqual([undefined, 'Chopped Romaine', 5.5, 5, 8]);
+    expect(prep.getRow(5).values).toEqual([undefined, 'Cobb Salad', 'each', 6, 14]);
+    expect(prep.getRow(20).values).toEqual([undefined, 'Sweet Tea', 'gal', 1.5, 3.5]);
+    expect(table.rowCount).toBe(18);
+    expect(prep.rowCount).toBe(20);
+    await expect(createSaturdayPrepWorkbook([records[2]], '2026-09-01', '2026-09-30')).rejects.toThrow('No completed, submitted');
   });
 });

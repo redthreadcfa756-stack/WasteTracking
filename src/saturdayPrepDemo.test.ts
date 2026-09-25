@@ -33,13 +33,12 @@ describe('Saturday Prep demo reports', () => {
     const records = createSaturdayPrepDemoRecords('00756', '2026-09-26', '2026-09-26');
     const demo = new ExcelJS.Workbook();
     await demo.xlsx.load(await createSaturdayPrepWorkbook(records, '2026-09-26', '2026-09-26', 'demo'));
-    expect(demo.getWorksheet('Daily totals')!.getCell('A1').value).toBe('DEMO · Saturday Prep (sample data)');
-    expect(demo.getWorksheet('Daily totals')!.getCell('B3').value).toBe('DEMO · Submitted');
-    expect(demo.getWorksheet('Table weights')!.getCell('B2').value).toBe('DEMO · Submitted');
-    expect(demo.getWorksheet('Prepared items')!.getCell('B2').value).toBe('DEMO · Submitted');
+    for (const sheet of demo.worksheets) {
+      expect(sheet.getCell('A1').value).toBe('DEMO · Saturday Prep (sample data)');
+    }
     const live = new ExcelJS.Workbook();
     await live.xlsx.load(await createSaturdayPrepWorkbook(records, '2026-09-26', '2026-09-26'));
-    expect(live.getWorksheet('Daily totals')!.getCell('A1').value).toBe('Saturday Prep');
-    expect(live.getWorksheet('Prepared items')!.getCell('B2').value).toBe('Submitted');
+    expect(live.getWorksheet('Table weights')!.getCell('A1').value).toBe('Saturday Prep');
+    expect(live.getWorksheet('Prepared items')!.getCell('A1').value).toBe('Saturday Prep');
   });
 });
