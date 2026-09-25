@@ -1,4 +1,5 @@
 import { SaturdayPrepTab } from './SaturdayPrepTab';
+import { adminSettingsSignature } from './adminSettings';
 import { isSaturday, prepDayKey } from './saturdayPrep';
 import { loadSaturdayPrep } from './saturdayPrepData';
 import { createSaturdayPrepWorkbook } from './saturdayPrepWorkbook';
@@ -2895,7 +2896,7 @@ function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDay
   const [selectedDaypart, setSelectedDaypart] = useState<DaypartId>('breakfast');
   const [saving, setSaving] = useState(false);
   const [device, setDevice] = useState(deviceName);
-  const [savedSettingsSignature, setSavedSettingsSignature] = useState(() => JSON.stringify(settings));
+  const [savedSettingsSignature, setSavedSettingsSignature] = useState(() => adminSettingsSignature(settings));
   const [savedDevice, setSavedDevice] = useState(deviceName);
   const [exportStartDate, setExportStartDate] = useState(dayKey());
   const [exportEndDate, setExportEndDate] = useState(dayKey());
@@ -2910,10 +2911,10 @@ function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDay
 
   useEffect(() => {
     setDraft(structuredClone(settings));
-    setSavedSettingsSignature(JSON.stringify(settings));
+    setSavedSettingsSignature(adminSettingsSignature(settings));
   }, [settings]);
 
-  const hasUnsavedChanges = JSON.stringify(draft) !== savedSettingsSignature || device !== savedDevice;
+  const hasUnsavedChanges = adminSettingsSignature(draft) !== savedSettingsSignature || device !== savedDevice;
 
   useEffect(() => {
     onDirtyChange(hasUnsavedChanges);
@@ -2981,7 +2982,7 @@ function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDay
       if (!settingsToSave.cooldownTimersEnabled) await resetAllCooldownTimers(storeId);
       localStorage.setItem('waste-sos-device-name', device.trim() || 'Web device');
       setDraft(settingsToSave);
-      setSavedSettingsSignature(JSON.stringify(settingsToSave));
+      setSavedSettingsSignature(adminSettingsSignature(settingsToSave));
       setSavedDevice(device);
       onDirtyChange(false);
       notify('Admin settings saved for every device.');
