@@ -1,17 +1,17 @@
 import ExcelJS from 'exceljs';
 import { PREP_ITEMS, prepTotals, promoFree, TABLE_ITEMS, type SaturdayPrepRecord } from './saturdayPrep';
 
-export async function createSaturdayPrepWorkbook(records: SaturdayPrepRecord[], start: string, end: string): Promise<ArrayBuffer> {
+export async function createSaturdayPrepWorkbook(records: SaturdayPrepRecord[], start: string, end: string, source: 'live' | 'demo' = 'live'): Promise<ArrayBuffer> {
   const workbook = new ExcelJS.Workbook();
   const summary = workbook.addWorksheet('Daily totals');
-  summary.addRow(['Saturday Prep', start, end]);
+  summary.addRow([source === 'demo' ? 'DEMO · Saturday Prep (sample data)' : 'Saturday Prep', start, end]);
   summary.addRow(['Date', 'Status', 'Table weight (lb)', 'Prepared waste (each)', 'Promo Free (each)', 'Tea waste (gal)', 'Tea Promo Free (gal)']);
   const table = workbook.addWorksheet('Table weights');
   table.addRow(['Date', 'Status', 'Item', 'Pounds', 'Ounces', 'Total weight (lb)']);
   const prep = workbook.addWorksheet('Prepared items');
   prep.addRow(['Date', 'Status', 'Item', 'Unit', 'At 10 p.m.', 'Left at 11 p.m. / wasted', 'Taken home / Promo Free']);
   for (const record of records) {
-    const status = record.submittedAt ? 'Submitted' : 'Draft — incomplete / not final';
+    const status = `${source === 'demo' ? 'DEMO · ' : ''}${record.submittedAt ? 'Submitted' : 'Draft — incomplete / not final'}`;
     const totals = prepTotals(record.values);
     summary.addRow([record.dayKey, status, totals.tableOunces / 16, totals.wastedEach,
       totals.promoEach, totals.wastedGallons, totals.promoGallons]);

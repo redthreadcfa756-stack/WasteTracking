@@ -3,6 +3,7 @@ import { adminSettingsSignature } from './adminSettings';
 import { isSaturday, prepDayKey } from './saturdayPrep';
 import { loadSaturdayPrep } from './saturdayPrepData';
 import { createSaturdayPrepWorkbook } from './saturdayPrepWorkbook';
+import { createSaturdayPrepDemoRecords } from './saturdayPrepDemo';
 import {
   AlertTriangle,
   CalendarDays,
@@ -3148,23 +3149,25 @@ function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDay
   const exportPrep = async () => {
     setExportingPrep(true);
     try {
-      const records = await loadSaturdayPrep(storeId, exportStartDate, exportEndDate);
+      const records = exportSource === 'demo'
+        ? createSaturdayPrepDemoRecords(storeId, exportStartDate, exportEndDate)
+        : await loadSaturdayPrep(storeId, exportStartDate, exportEndDate);
       if (!records.length) {
-        notify('No Saturday Prep logs were found in this date range.');
+        notify(exportSource === 'demo' ? 'Choose a date range containing at least one Saturday for the demo report.' : 'No Saturday Prep logs were found in this date range.');
         return;
       }
-      const workbook = await createSaturdayPrepWorkbook(records, exportStartDate, exportEndDate);
+      const workbook = await createSaturdayPrepWorkbook(records, exportStartDate, exportEndDate, exportSource);
       const url = URL.createObjectURL(new Blob([workbook], {
         type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       }));
       const link = document.createElement('a');
       link.href = url;
-      link.download = `saturday-prep-${exportStartDate}-through-${exportEndDate}.xlsx`;
+      link.download = `${exportSource === 'demo' ? 'demo-' : ''}saturday-prep-${exportStartDate}-through-${exportEndDate}.xlsx`;
       document.body.appendChild(link);
       link.click();
       link.remove();
       window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-      notify('Saturday Prep report downloaded. Drafts are labeled as not final.');
+      notify(exportSource === 'demo' ? 'Saturday Prep demo report downloaded.' : 'Saturday Prep report downloaded. Drafts are labeled as not final.');
     } catch (caught) {
       notify(errorMessage(caught));
     } finally {
@@ -3530,10 +3533,10 @@ function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDay
           <Download aria-hidden="true" /> {exportingDonations ? 'Preparing…' : 'Download donations workbook'}
         </button>
         <button className="secondary-button" onClick={exportPrep}
-          disabled={exportingPrep || exportSource !== 'live' || !exportStartDate || !exportEndDate}>
+          disabled={exportingPrep || !exportStartDate || !exportEndDate}>
           <Download aria-hidden="true" /> {exportingPrep ? 'Preparing…' : 'Download Saturday Prep workbook'}
         </button>
-        <p>Saturday Prep reports use live data and include daily totals and every item. Unsubmitted drafts are clearly labeled.</p>
+        <p>Saturday Prep reports include daily totals and every item. Choose Demo data for sample Saturdays in your date range; no seeding is needed. Live drafts are labeled as not final.</p>
         <div className="demo-data-controls">
           <div>
             <strong>Demo export data</strong>

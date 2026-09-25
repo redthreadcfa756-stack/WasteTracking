@@ -141,13 +141,12 @@ function PrepForm({ storeId, date, admin }: { storeId: string; date: string; adm
         </div>;
       })}
     </section>
-    <section className="prep-summary" aria-label="Saturday totals">
-      <h3>{submitted ? 'Submitted totals' : 'Totals entered so far'}</h3>
+    {submitted && <section className="prep-summary" aria-label="Saturday totals">
+      <h3>Submitted totals</h3>
       <p>Table items: <strong>{Math.floor(totals.tableOunces / 16)} lb {Number((totals.tableOunces % 16).toFixed(3))} oz</strong></p>
       <p>Prepared items wasted: <strong>{totals.wastedEach} each</strong> · Promo Free: <strong>{totals.promoEach} each</strong></p>
       <p>Sweet tea wasted: <strong>{totals.wastedGallons} gal</strong> · Promo Free: <strong>{totals.promoGallons} gal</strong></p>
-      {!submitted && errors.length > 0 && <p>Totals are incomplete until every field is filled and valid.</p>}
-    </section>
+    </section>}
     {showValidation && errors.length > 0 && <div className="form-error" role="alert">
       <p>Complete all entries before submitting:</p><ul>{errors.map((message) => <li key={message}>{message}</li>)}</ul>
     </div>}
