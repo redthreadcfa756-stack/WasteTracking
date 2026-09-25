@@ -571,6 +571,7 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
   const storeData = useStoreData(member.storeId, now);
   const settings = storeData.settings || DEFAULT_SETTINGS;
   const [activeTab, setActiveTab] = useState<TabId>('waste');
+  const [prepAdminAccess, setPrepAdminAccess] = useState(false);
   const [menuSelection, setMenuSelection] = useState<MenuSelection>('auto');
   const [testDaypartEnabled, setTestDaypartEnabled] = useState(false);
   const [testWasteEvents, setTestWasteEvents] = useState<WasteEvent[]>([]);
@@ -590,7 +591,7 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
   const visibleTabs = TABS.filter((tab) => (
     (tab.id !== 'sos' || settings.sosEnabled)
     && (tab.id !== 'discard' || settings.discardTrackingEnabled)
-    && (tab.id !== 'saturday-prep' || saturdayAvailable)
+    && (tab.id !== 'saturday-prep' || saturdayAvailable || (activeTab === 'saturday-prep' && prepAdminAccess))
   ));
 
   const notify = useCallback((message: string) => {
@@ -666,11 +667,15 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
     if (
       (activeTab === 'sos' && !settings.sosEnabled)
       || (activeTab === 'discard' && !settings.discardTrackingEnabled)
-      || (activeTab === 'saturday-prep' && !saturdayAvailable)
+      || (activeTab === 'saturday-prep' && !saturdayAvailable && !prepAdminAccess)
     ) {
       setActiveTab('waste');
     }
-  }, [activeTab, settings.sosEnabled, settings.discardTrackingEnabled, saturdayAvailable]);
+  }, [activeTab, settings.sosEnabled, settings.discardTrackingEnabled, saturdayAvailable, prepAdminAccess]);
+
+  useEffect(() => {
+    if (activeTab !== 'saturday-prep') setPrepAdminAccess(false);
+  }, [activeTab]);
 
   useIdleAction(activeTab === 'discard', DISCARD_IDLE_TIMEOUT_MS, () => {
     returnToCooldown('Returned to Cool Down after 45 seconds of inactivity.');
@@ -987,7 +992,7 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
             notify={notify}
           />
         )}
-        {activeTab === 'saturday-prep' && <SaturdayPrepTab storeId={member.storeId} />}
+        {activeTab === 'saturday-prep' && <SaturdayPrepTab storeId={member.storeId} admin={prepAdminAccess} />}
         {activeTab === 'usage' && (
           <UsageTab
             settings={settings}
@@ -1007,6 +1012,10 @@ function Dashboard({ user, member }: { user: User; member: MemberProfile }) {
             setTestDaypartEnabled={setTestDaypartEnabled}
             notify={notify}
             onDirtyChange={setAdminDirty}
+            onOpenSaturdayPrep={() => {
+              setPrepAdminAccess(true);
+              setActiveTab('saturday-prep');
+            }}
           />
         )}
       </main>
@@ -2871,7 +2880,7 @@ function DonationSubmit({ existing, dayLabel, zeroDonationItems, onClose, onSubm
   );
 }
 
-function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDaypartEnabled, notify, onDirtyChange }: {
+function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDaypartEnabled, notify, onDirtyChange, onOpenSaturdayPrep }: {
   settings: AppSettings;
   member: MemberProfile;
   deviceName: string;
@@ -2879,6 +2888,7 @@ function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDay
   setTestDaypartEnabled: (enabled: boolean) => void;
   notify: (message: string) => void;
   onDirtyChange: (dirty: boolean) => void;
+  onOpenSaturdayPrep: () => void;
 }) {
   const storeId = member.storeId;
   const [draft, setDraft] = useState<AppSettings>(() => structuredClone(settings));
@@ -2895,7 +2905,6 @@ function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDay
   const [exporting, setExporting] = useState(false);
   const [exportingDonations, setExportingDonations] = useState(false);
   const [exportingPrep, setExportingPrep] = useState(false);
-  const [prepOpen, setPrepOpen] = useState(false);
   const [exportSource, setExportSource] = useState<'live' | 'demo'>('live');
   const [changingDemoData, setChangingDemoData] = useState(false);
 
@@ -3197,10 +3206,12 @@ function AdminTab({ settings, member, deviceName, testDaypartEnabled, setTestDay
         <button className="primary-button" onClick={save} disabled={saving}><Save /> {saving ? 'Saving…' : 'Save all changes'}</button>
       </div>
       <AlarmMutedNotice page="Admin" timeout="2 minutes" />
-      <details className="admin-dropdown" onToggle={(event) => setPrepOpen(event.currentTarget.open)}>
-        <summary>Saturday Prep · view, enter, or correct a log</summary>
-        {prepOpen && <SaturdayPrepTab storeId={storeId} admin />}
-      </details>
+      <div>
+        <button className="secondary-button" onClick={onOpenSaturdayPrep} disabled={hasUnsavedChanges}>
+          <CalendarDays aria-hidden="true" /> Open Saturday Prep
+        </button>
+        <p>{hasUnsavedChanges ? 'Save your settings changes before opening Saturday Prep.' : 'Open the Saturday Prep tab to view, enter, or correct a Saturday log.'}</p>
+      </div>
       <div className="admin-strip">
         <label>This device name<input value={device} onChange={(event) => setDevice(event.target.value)} /></label>
         <label className="toggle-row">

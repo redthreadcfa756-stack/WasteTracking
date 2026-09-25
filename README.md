@@ -84,7 +84,7 @@ The Discard tab includes Large fries as a discard-only product counted by servin
 
 ### Saturday Prep
 
-The **Saturday Prep** staff tab appears on Saturdays in the store's `America/New_York` timezone. **Admin → Saturday Prep** is available every day and supports selecting any past Saturday or the current Saturday. It uses the 14 table items and 16 prepared items from the paper closing log.
+The **Saturday Prep** staff tab appears on Saturdays in the store's `America/New_York` timezone. **Admin → Open Saturday Prep** opens that same tab every day, with a date selector for any past Saturday or the current Saturday and controls for corrections. This Admin access ends when you leave the Saturday Prep tab; outside Saturdays the tab then hides again. It uses the 14 table items and 16 prepared items from the paper closing log.
 
 - At 10 p.m., enter table weights using separate whole-pound and ounce fields, plus the quantity of each prepared item.
 - At 11 p.m., enter what remains to be thrown away. **Promo Free = quantity at 10 p.m. − quantity left at 11 p.m.** Sweet tea is measured in gallons; all other prepared items are counted individually.

@@ -1470,7 +1470,6 @@ label,
 
 /* Saturday closing log: keep all three quantities readable on phones. */
 .saturday-prep { min-width: 0; }
-.admin-dropdown > .saturday-prep { padding: 1rem; }
 .prep-section, .prep-summary { background: var(--surface, white); border: 1px solid #d9e2ec; border-radius: 14px; padding: 1rem; }
 .prep-section > p, .saturday-prep > p { color: #52616b; line-height: 1.5; }
 .prep-weight-row, .prep-weight-head { display: grid; grid-template-columns: minmax(0, 1fr) 100px 100px; align-items: center; gap: .65rem; padding: .7rem 0; }
